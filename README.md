@@ -123,27 +123,57 @@ budget bugs — see [NOTES.md](NOTES.md).
 | Build | 2.5 s |
 | **Mean query latency** | **0.37 ms** |
 
-### Dense index — measured
+### Indexes — measured, all three strategies
 
-Encoder `BAAI/bge-small-en-v1.5`, 384 dimensions, float32, CPU.
+Encoder `BAAI/bge-small-en-v1.5`, 384 dimensions, float32, CPU. Latency is the mean of 500
+queries on an idle machine.
 
-| Strategy | Vectors | Size | Build | chunks/s | tokens/s | Exact query |
-|---|---:|---:|---:|---:|---:|---:|
-| `fixed` | 14,660 | 23 MB | ~41 min | 6.0 | 1,486 | **2.38 ms** |
-| `heading` | 22,789 | 35 MB | ~37 min | 10.3 | 1,377 | 4.78 ms |
+| Strategy | Vectors | Size | Build | chunks/s | tokens/s | Dense query | BM25 query |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `fixed` | 14,660 | 23 MB | 40.8 min | 6.0 | 1,494 | **1.07 ms** | 0.33 ms |
+| `heading` | 22,789 | 35 MB | 37.0 min | 10.3 | 1,375 | **1.68 ms** | 0.40 ms |
+| `heading_ctx` | 24,120 | 37 MB | 48.9 min | 8.2 | 1,397 | **1.73 ms** | 0.51 ms |
+| | | | **127 min total** | | | | |
 
-Query latency is an exhaustive scan of every vector — no approximation, no index
-structure. That is the number behind the no-ANN decision in §4: full-corpus exact search
-costs single-digit milliseconds, so an approximate index would trade recall for a saving
-that does not exist at this scale. Latency is memory-bandwidth bound and therefore
-sensitive to load; the `fixed` figure moved 2.38 → 3.43 ms while another build was
-saturating five cores, so these are idle-machine measurements.
+**Why no ANN.** Both query columns are an exhaustive pass over the entire corpus — every
+vector, every posting — with no index structure and no approximation. At 1–2 ms, an
+approximate index would trade guaranteed recall for a saving that does not exist. §7 covers
+the scale at which that flips. Latency is memory-bandwidth bound and therefore
+load-sensitive: the same `fixed` index measured 1.07 ms idle and 3.43 ms while another
+build saturated five cores, which is why the measurement condition is stated.
 
-The two rows are also a natural experiment worth reading: same corpus, same encoder,
-chunking as the only difference. Per-*chunk* throughput differs by 1.7×; per-*token*
-throughput differs by 8%. Encoder cost is set by tokens, and "texts per second" is an
-artefact of the text length you benchmarked on. See [NOTES.md](NOTES.md) — this corrected
-an estimate of mine that was ~27× optimistic.
+**The three rows are a natural experiment.** Same corpus, same encoder, same hardware —
+chunking is the only variable, and it moves mean chunk length from 536 to 997 characters:
+
+- per-**chunk** throughput spans 6.0 → 10.3 (**1.7×**)
+- per-**token** throughput spans 1,375 → 1,494 (**8%**)
+
+Encoder cost is set by tokens; "texts per second" is an artefact of whatever text length
+you benchmarked on. This corrected an estimate of mine that was ~27× optimistic — the
+original benchmark's *token* figure had been roughly right all along, only the unit was
+wrong. See [NOTES.md](NOTES.md).
+
+### A worked example — illustrative, not a metric
+
+One real query against the built `heading` index, top 3 from each arm. The question
+describes incremental models without ever using the word *incremental*, which is precisely
+the case where lexical and semantic retrieval diverge:
+
+> **"how do I avoid rebuilding the whole table on every run"**
+
+| Arm | Top result |
+|---|---|
+| BM25 | *Why can't I just write DML in my transformations?* — keyword collision on "write", "table", "run". Misses. |
+| Dense | *Idempotence in dbt → Full-refresh as a safety net* — adjacent, but #3 is a **billing** page. Noisy. |
+| **Hybrid (RRF)** | ***Configure incremental models → Defining incremental materializations*** — correct. |
+
+Neither arm alone puts the right page first; the fusion does. This is one anecdote, chosen
+because it illustrates the mechanism — it is **not** evidence, and it is not a substitute
+for the tables below. Reproduce it with:
+
+```bash
+uv run production-rag search "how do I avoid rebuilding the whole table on every run" --arm hybrid
+```
 
 ### Retrieval quality — _pending, session 2_
 
