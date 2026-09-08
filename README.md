@@ -181,18 +181,54 @@ for the tables below. Reproduce it with:
 uv run production-rag search "how do I avoid rebuilding the whole table on every run" --arm hybrid
 ```
 
-### Retrieval quality — _pending, session 2_
+### How ground truth was built
 
-Requires ground truth: ~200 LLM-proposed question→gold-chunk pairs, ~60 of them
-hand-verified by the author with the correction rate reported, plus ~15 hand-written
-cross-tool and unanswerable questions. Arms to be reported (BM25 · dense · hybrid ·
-hybrid+rerank · hybrid+rerank+rewrite) × 3 chunking strategies, **broken down by question
-category** rather than pooled.
+Retrieval numbers are only as good as the labels they are scored against, so the labelling
+is described before the numbers rather than after.
+
+**Gold is a character span in a document, not a chunk id.** Three chunking strategies
+produce 14,660 / 22,789 / 24,120 chunks and share no ids between them, so a chunk-level
+label would either make the cross-strategy comparison impossible or force three separate
+labelling efforts and then compare numbers built on different labels. Each label is
+`(doc_id, start, end)` anchored to a verbatim quote; every chunker already records the
+span each chunk came from, so each strategy derives its own gold chunk ids by overlap at
+scoring time. One labelling effort, three comparable evaluations, and the labels survive a
+change to the chunk size. Coverage — the share of questions whose evidence a given
+strategy's chunks actually carry — is reported with the results, because a strategy that
+fails to map some evidence is being scored on a different question set.
+
+**Questions come from three places, and the weakest source is guarded hardest.**
+
+| Source | What it produces | Guard |
+|---|---|---|
+| LLM, from a sampled passage | The bulk. Passages stratified by tool, so the set is not 53% dbt like the corpus | Claimed quote must locate verbatim in the real document; context-dependent phrasings ("in the passage above") and near-duplicates rejected. Every rejection is counted |
+| Hand-written, cross-tool | Questions whose answer needs two tools at once — the case the hybrid arm is supposed to earn its keep on | Quotes resolved at load time; a quote that no longer locates raises rather than silently shrinking the bucket |
+| Hand-written, unanswerable | No evidence anywhere in the corpus, including two *near misses* using entirely in-domain vocabulary | Scored separately: recall over an empty gold set is undefined |
+
+**The category is computed, not claimed.** Whether a question counts as
+*exact-terminology* or *conceptual* is decided by corpus document frequency — does it share
+a token with its own evidence that appears in ≤50 of ~23,000 chunks? — rather than by the
+label the generating model attached to its own output. A model asked to write a conceptual
+question and then to say whether it did will say yes.
+
+**A human verifies a sample.** Nothing above establishes that a question is sensible or
+that its labelled passage is really the best evidence; only someone who knows the tools can
+say that. `production-rag verify` walks the set and records accept / edit / reject with the
+correction rate, and the headline table is restricted to the verified subset.
+
+### Retrieval quality — _measurement in progress_
+
+Arms (BM25 · dense · hybrid-RRF · hybrid-score · +rerank · +rewrite-expand ·
++rewrite-replace) × 3 chunking strategies, **broken down by question category** rather than
+pooled: a single mean over a set whose category mix the reporter chose is a number about
+the mix.
 
 Recorded in advance, to be checked against the measurement: query rewriting is expected to
 *hurt* exact-terminology queries — paraphrasing destroys the literal token BM25 matches on
 — and help conceptual and cross-tool ones. If so the conclusion is "rewrite conditionally",
-not "rewriting improves retrieval."
+not "rewriting improves retrieval." The `expand` and `replace` arms exist to separate those
+two possibilities: `expand` keeps the original query in the fusion, so it can add a passage
+but cannot remove the literal match; `replace` cannot.
 
 ### Answer quality — _pending, session 2_
 
@@ -226,17 +262,36 @@ Then query it:
 uv run production-rag search "how do I make a dbt model incremental" --arm hybrid
 ```
 
-`--arm` takes `bm25`, `dense` or `hybrid`; `--strategy` takes `fixed`, `heading` or
-`heading_ctx`; `--fusion` takes `rrf` or `score`. The lexical arm alone needs no
-embedding model:
+`--arm` takes `bm25`, `dense`, `hybrid`, `hybrid_score`, `hybrid_rerank`, `rerank_rewrite`
+or `rerank_rewrite_only`; `--strategy` takes `fixed`, `heading` or `heading_ctx`;
+`--fusion` takes `rrf` or `score`. The lexical arm alone needs no embedding model:
 
 ```bash
 uv run production-rag index --no-dense --strategy heading
 uv run production-rag search "on_schema_change" --arm bm25
 ```
 
-Generation (session 2) will require `OPENROUTER_API_KEY` in `.env` — see
-[.env.example](.env.example). Retrieval requires no secret at all.
+### Reproducing the evaluation
+
+Every published retrieval number replays with no API key and no network, because the LLM
+and cross-encoder responses ship with the repository:
+
+```bash
+uv run production-rag cache import
+uv run production-rag eval --replay --verified-only
+```
+
+`--replay` turns a cache miss into an error rather than a live call, so a number that
+cannot be reproduced offline cannot quietly appear in this README. Regenerating the eval
+set from scratch — which *does* need `OPENROUTER_API_KEY` (see [.env.example](.env.example))
+and takes a couple of hours on the free tier — is:
+
+```bash
+uv run production-rag propose --passages 120     # LLM question candidates
+uv run production-rag verify --limit 60          # the human pass
+uv run production-rag eval                       # the grid
+uv run production-rag cache export               # re-bundle for replay
+```
 
 ## 7. What I'd change at 100× scale
 
