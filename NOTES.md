@@ -217,6 +217,32 @@ between runs is not a published number.
 
 ---
 
+## CPU embedding is the real bottleneck, and the benchmark lied
+
+Timing the encoder on short strings gave **160 texts/s**, which predicted ~2.4 minutes to
+embed a 22,789-chunk index. The actual full-corpus build ran **40+ minutes on the first
+strategy alone**.
+
+The benchmark was wrong because the strings were wrong. It used ~50-character sentences
+(~12 tokens); real chunks are ~1,000 characters (~250 tokens). Transformer cost at these
+lengths is roughly linear in token count, so a 20× longer input is ~20× slower — about
+8 texts/s, which is exactly what the real build shows. **Throughput per *text* is a
+meaningless unit for an encoder; throughput per *token* is the one that transfers.**
+
+Consequence: rebuilding all three strategies is ~1.5 hours, which makes the
+chunking × arm grid painful to iterate on. Fixes for session 2, in order of value:
+
+1. **Cache embeddings by content hash.** `heading` and `heading_ctx` share a substantial
+   amount of chunk text; today every strategy re-embeds from scratch.
+2. Confirm no silent truncation — bge-small's window is 512 tokens and chunks top out
+   around 350, so the character budget is comfortably inside it. Worth asserting rather
+   than assuming, since truncation is silent.
+3. Batch size and thread-count tuning, which is the smallest of the three wins.
+
+Recording this mainly as a methodology point: the mistake was benchmarking on convenient
+inputs instead of representative ones, and it produced an estimate that was wrong by more
+than an order of magnitude.
+
 ## Session 1 boundary
 
 Everything above runs with **no API key and no network** (after the one-time ingest).
