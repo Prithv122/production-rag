@@ -43,6 +43,9 @@ dev = [
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "slow: needs the real embedding model or the network; deselected in CI's fast job",
+]
 
 [tool.ruff]
 line-length = 100

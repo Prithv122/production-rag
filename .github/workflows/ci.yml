@@ -7,6 +7,9 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The fast job deliberately does NOT install the `embed` extra. Retrieval is
+  # tested against the deterministic hashing FakeEmbedder in tests/conftest.py,
+  # so CI never downloads torch (~2 GB) to check that ranking works.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -20,8 +23,18 @@ jobs:
       - name: Set up Python
         run: uv python install
 
-      - name: Install dependencies
+      - name: Install dependencies (no embed extra -- no torch)
         run: uv sync --all-groups
+
+      - name: Assert torch is absent
+        # Guards the property above: if someone promotes sentence-transformers
+        # out of the optional extra, this job silently becomes a 10-minute
+        # install. Fail loudly instead.
+        run: |
+          if uv run python -c "import torch" 2>/dev/null; then
+            echo "::error::torch is installed in the fast job; keep sentence-transformers in the 'embed' extra"
+            exit 1
+          fi
 
       - name: Lint
         run: |
@@ -29,4 +42,4 @@ jobs:
           uv run ruff format --check .
 
       - name: Test
-        run: uv run pytest --cov=src --cov-report=term-missing
+        run: uv run pytest -m "not slow" --cov=src --cov-report=term-missing
