@@ -1,11 +1,11 @@
 # Interview Prep — production-rag
 
-**Five questions, five answers.** An unanswered question means this project is not shipped.
+**Seven questions, seven answers.** An unanswered question means this project is not shipped.
 
 If you can't answer one, you don't understand that part of your own project yet — go back and understand it. This file is the difference between a portfolio that survives a technical screen and one that collapses in it.
 
-> Answers cover retrieval, which is measured. Generation lands in session 3 and Q6 below is
-> the placeholder for it — it is marked, not hidden.
+> Answers cover retrieval and generation, both measured. Where a number is thin — n=6
+> unanswerable questions, 60 of 184 verified — the answer says so rather than rounding it up.
 
 ---
 
@@ -62,8 +62,16 @@ retrieval and inflates the BM25 column specifically. I built three defences (the
 quote must locate verbatim in the real document, which rejected 18% of proposals; the
 question category is computed from corpus document frequency rather than taken from the
 model's self-label, which disagreed 39% of the time; and a human verification pass), but the
-first two only remove obvious failures and the third has not run yet. Until it does, the
-numbers are labelled provisional.
+first two only remove obvious failures and the third has covered 60 of 184 questions with
+**zero corrections** — which is a fact about the screening in front of it as much as about
+the questions, and cannot distinguish a clean set from a reviewer who accepted too readily.
+
+The re-cut on those 60 is in the README and it changes no conclusion, but it is the second
+thing I'd flag: every metric drops 5–9 points on the verified subset, and resampling says
+that is what a 60-question slice does. A 60-question subset moves recall@5 by ±0.10 at 95%.
+So the arm *ordering* is the result; the third decimal place in those tables is decoration,
+and I built `production-rag band` to be able to say that with a number rather than a
+feeling.
 
 Under load, exact search breaks first, and not where it looks. At 100× (~2.4 M chunks) the
 vector matrix is ~3.5 GB — still loadable, but a query moves 3.5 GB through memory, so
@@ -131,11 +139,67 @@ What would actually fix it is questions sampled from real user logs. I don't hav
 saying "the eval set is the bottleneck" is more useful than pretending 184 synthetic questions
 characterise a production system.
 
-### Q6. Answer quality — _pending, session 3._
+### Q6. How do you score the *answers*, given there's no gold answer text — and why not an LLM judge?
 
-_A:_ Not yet measured. Faithfulness, citation correctness, refusal accuracy, JSON parse rate
-and cost across four providers reading the same frozen retrieved chunks. Leaving this
-unanswered rather than guessing is deliberate.
+_A:_ I deliberately didn't appoint one. An LLM judge makes your headline number depend on a
+model you can't pin, can't cache honestly across versions, and a reader can't re-run — and
+this project's entire claim is that its numbers reproduce offline for someone who doesn't
+trust me. So every answer metric is arithmetic over something that either happened or didn't:
+
+- **Citation validity** — the model is handed N numbered passages, so a `[n]` outside `1..N`
+  is a fabricated source, catchable by arithmetic. 141 markers written across three models,
+  141 resolved, zero fabricated. That's a null result and I report it as one: "no fabrication
+  observed at n=141", not "these models don't fabricate".
+- **Grounded** — the answer cited at least one chunk containing a gold evidence span. Reuses
+  the retrieval labels, so it's free over the whole set. It is *not* "the answer is correct";
+  a model can cite the right passage and summarise it wrongly, and the README says so.
+- **Refusal recall paired with false refusal**, never one alone — a model that refuses
+  everything scores 1.000 on the first.
+
+The result I'd lead with is a controlled one. `qwen2.5:7b` and `qwen2.5-coder:7b` are the same
+architecture, same parameter count, same q3_K_M quantisation, same prompt, same frozen
+retrieved context — the only variable is instruction tuning. The code-tuned model grounds
+**0.478 vs 0.341**, and on exact-terminology questions **0.786 vs 0.500**. On API
+documentation, which 7B you pick matters more than the prompt engineering on top of it.
+
+Two honesty points I'd raise before being asked. First, **the biggest effect in that whole
+section was my bug, not a model**: the first run scored 0.977 uncited, because my prompt's
+rules said "cite with `[n]`" while the output example directly below showed an answer with no
+markers in it. An example is a stronger instruction than a rule. Fixing the example moved
+uncited to 0.174–0.390 — further than the gap between the best and worst model.
+
+Second, **this is a local three-model comparison, not the hosted one I planned.** A
+credit-less OpenRouter account is capped at 50 free-model requests a day, account-wide, and
+paid models 402. I say that rather than quietly relabelling local models as the hosted table.
+
+### Q7. Tell me about a bug you shipped and how you caught it.
+
+_A:_ I published a table that was one model wearing four hats.
+
+The first answer eval compared four models and produced four near-identical rows — same
+refusal rate to three decimals, the same 10 of 54 questions refused by all four. A 120B, a
+550B, a hosted Gemini and a 7B local quant do not agree perfectly. It was one model: every
+OpenRouter call had failed and `FallbackProvider` had silently answered with local Ollama.
+
+Three faults stacked. The account can't reach hosted models (429 free-tier daily cap, 402 for
+paid). One arm had a typo'd model id — `nemotron-3-ultra-550b:free` instead of
+`...-550b-a55b:free` — so it had *never once executed*, including in the previous session
+where I'd described its behaviour in a code comment. And the fallback made both invisible by
+design: graceful degradation is a feature of the demo and a falsification inside a comparison.
+
+Then it got worse, in the useful way. I wrote an audit over the committed response cache and
+pointed it at the *previous* session's bundle: of 337 rewrite calls I'd attributed to a 120B
+model, **279 (83%) had been answered by local qwen**. The retrieval comparison survived —
+every arm consumed the same committed rewrites and they replay byte-identically — but the
+attribution in my README was wrong, and so was a latency figure that averaged two models and
+described neither.
+
+What I actually take from it: every one of those faults was *already recorded in an artefact
+I had committed to git*. The cache stored the requested model and the answering model side by
+side, for a session and a half, and nothing read them. A resilience feature and an integrity
+check want opposite things from the same event, and I'd built only the resilience half. The
+fixes are structural — `answer-eval` disables fallback, the summary reports a per-arm
+`fell_back` rate, and `cache audit` exits non-zero on any requested-vs-answered mismatch.
 
 ---
 

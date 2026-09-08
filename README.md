@@ -473,11 +473,111 @@ is conceptual or cross-tool, where replacing is the only thing that moved the ne
 pooled mean over this set would have reported `expand` as a 1.7-point win and buried
 everything above.
 
-### Answer quality — _pending, session 3_
+### Answer quality — measured, on three **local** models
 
-Faithfulness, citation correctness, refusal accuracy, JSON parse rate, latency and cost,
-across `nemotron-3-super:free`, `nemotron-3-ultra:free`, `gemini-2.5-flash-lite` and local
-Ollama, all reading the **same frozen retrieved chunks** so only generation varies.
+> **What this is and is not.** The plan was to compare hosted models —
+> `nemotron-3-super:free`, `nemotron-3-ultra:free` and `gemini-2.5-flash-lite`. **That
+> comparison could not be run.** A credit-less OpenRouter account is capped at **50 free-model
+> requests per day, account-wide** (HTTP 429 `free-models-per-day`, verified against several
+> different free models — swapping model is not a workaround), and paid ids return **402**,
+> the account having never purchased credits. Rather than buy credits or publish a hosted
+> table I could not stand behind, the measurement below runs on **three local Ollama models**
+> and is labelled as exactly that. It is not equivalent to the planned hosted comparison and
+> is not presented as one. The upside is real, though: it needs no key, no quota and no trust
+> in me, so this is the *more* reproducible half of the project rather than the less.
+
+60 questions — every unanswerable and every cross-tool one, plus a seeded proportional sample
+(35 conceptual, 15 exact_term, 4 cross_tool, 6 unanswerable; 21 of the 60 human-verified).
+Retrieval is **frozen**: every arm is fed the identical `hybrid_score_weighted` / `heading`
+top-10 replayed from `eval/results/retrieval.json`, so nothing below is a retrieval
+difference. Provider fallback is **disabled** for this run and `fell back` is reported to
+prove it.
+
+| Arm | model | refusal recall | false refusal | grounded | citation validity | uncited | unparseable | fell back | median s |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `ollama-qwen` | qwen2.5:7b-instruct-q3_K_M | 1.000 | 0.241 | 0.341 | 1.000 | 0.390 | 0.017 | 0.000 | 114.9 |
+| **`ollama-qwen-coder`** | qwen2.5-coder:7b-instruct-q3_K_M | **1.000** | **0.148** | **0.478** | 1.000 | **0.174** | 0.017 | 0.000 | 113.3 |
+| `ollama-llama-3b` | llama3.2:3b | 0.833 | 0.167 | 0.333 | 1.000 | 0.222 | 0.050 | 0.000 | **60.5** |
+
+**grounded, by category**
+
+| Arm | exact_term | conceptual | cross_tool |
+|---|---:|---:|---:|
+| `ollama-qwen` | 0.500 (n=14) | 0.259 (n=27) | — |
+| `ollama-qwen-coder` | **0.786** (n=14) | **0.355** (n=31) | 0.000 (n=1) |
+| `ollama-llama-3b` | 0.500 (n=14) | 0.276 (n=29) | 0.000 (n=2) |
+
+`grounded` = of the answerable questions that got an answer, the share citing at least one
+chunk containing a gold evidence span. **That is not "the answer is correct"** — a model can
+cite the right passage and summarise it wrongly — and it is the strongest claim the existing
+span labels support. `refusal recall` is never reported without `false refusal`: a model that
+refuses everything scores 1.000 on the first. There is no LLM judge; see §4.
+
+#### 1. Instruction tuning beat everything else, and it was a controlled test
+
+`ollama-qwen` and `ollama-qwen-coder` are the **same architecture, same 7.6B parameters, same
+q3_K_M quantisation, same prompt, same frozen context**. The only variable is what they were
+tuned on. The code-tuned one grounds **+13.7 points** better (0.478 vs 0.341), leaves
+**less than half** as many answers uncited (0.174 vs 0.390), and refuses answerable questions
+**less** often (0.148 vs 0.241) while still catching every unanswerable one.
+
+The gap is widest exactly where you would predict on a corpus of API documentation:
+**exact-terminology grounding, 0.786 vs 0.500**. Config keys, flags and function names are
+the tokens a code-tuned model is trained not to paraphrase — which is the same mechanism that
+made `replace` rewriting help exact-term retrieval earlier in this README.
+
+The practical reading: on technical documentation, *which* 7B you pick matters more than the
+prompt engineering on top of it, and it is cheap to test because the two models are the same
+size.
+
+#### 2. Half the parameters cost far less than half the quality
+
+`llama3.2:3b` has **fewer than half** the parameters and grounds statistically level with the
+7B general model (0.333 vs 0.341) at **roughly half the latency** (60.5 s vs 114.9 s median).
+It pays for that in two places that matter for a RAG system specifically: it **missed one of
+the six unanswerable questions** (refusal recall 0.833 — the only arm that ever answered a
+question with no answer in the corpus), and it failed to emit parseable JSON **three times as
+often** (0.050 vs 0.017). Both failures are the kind that a demo never shows you.
+
+#### 3. Not one fabricated citation in 141 markers
+
+Across all three models, **141 citation markers were written and all 141 resolved** to a
+passage that model had actually been shown (`ollama-qwen` 39, `ollama-qwen-coder` 50,
+`ollama-llama-3b` 52). Zero fabricated sources.
+
+This is a null result and it is reported as one: the machinery built to catch invented
+citations caught nothing. With 141 markers the honest statement is "no fabrication was
+observed at this scale", not "these models do not fabricate". The check costs one regex and
+stays in.
+
+#### 4. The largest effect in this whole section was a prompt bug, not a model
+
+The first run of this eval scored **0.977 uncited** — 43 of 44 answers asserting facts with
+no marker at all, from models that were otherwise answering correctly out of the right
+passages. Not a model failure. The rules said "cite with square-bracket markers"; the output
+example immediately below them was `{"sufficient": ..., "answer": "..."}`, with no markers in
+it. **The example is a stronger instruction than the rule**, and the models matched the shape
+they were shown.
+
+Putting a marked-up answer in the example took uncited from 0.977 to **0.174–0.390**. For
+context, that single edit moved the metric further than the entire gap between the best and
+worst model in the table. The repair then caused its own failure — a *realistic* example got
+plagiarised verbatim by the 3B model into an answer where it was nonsense — so the example is
+now neutral placeholder text. Both halves are in [NOTES.md](NOTES.md).
+
+#### 5. cross-tool questions stay broken end to end
+
+Retrieval scored 0.000 on cross-tool questions; generation cannot rescue that. Only 1–2 of
+the four were answered at all rather than refused, and none cited a gold span. The refusals
+are arguably the *correct* behaviour — the evidence was never retrieved — which is the one
+place in this project where the refusal path is doing real work. n = 4.
+
+> **Caveats.** n = 60, of which only 21 are human-verified, 6 unanswerable and 4 cross-tool;
+> the §5 sampling band applies here too and is wider at these n. `grounded` measures citation
+> targeting, not correctness. Latency is wall-clock on one desktop CPU with 4 workers against
+> a single Ollama instance, so requests contend — the figures are comparable *to each other*
+> and are not per-call latencies (a single `ask` on the same machine returns in ~52 s).
+> Reproduce with `production-rag answer-eval --subset 60`, which needs Ollama and no key.
 
 ## 6. How to run
 
@@ -567,8 +667,22 @@ and cross-encoder responses ship with the repository:
 
 ```bash
 uv run production-rag cache import
-uv run production-rag eval --replay --verified-only
+uv run production-rag eval --replay --verified-only     # retrieval
+uv run production-rag answer-eval --subset 60 --replay  # generation
+uv run production-rag cache audit                       # provenance of the bundles
 ```
+
+**Verified, not asserted.** The answer table above was reproduced from a *fresh* cache built
+only from the committed bundle, with `OPENROUTER_API_KEY=""` and `OLLAMA_HOST` pointed at a
+dead port — identical figures to the live run, so nothing in it depends on a key, a quota or
+this machine.
+
+`cache audit` is the provenance check added in session 3: it compares the model each cache
+entry *requested* against the model that actually *answered*, and exits non-zero on any
+disagreement. **On this repository it exits 1**, reporting the 279 session-2 rewrite calls
+described in the correction above. That is deliberate — those entries are required to replay
+the published retrieval numbers, so they stay, and the command tells the truth about them
+rather than the repository quietly looking clean.
 
 `--replay` turns a cache miss into an error rather than a live call, so a number that
 cannot be reproduced offline cannot quietly appear in this README. Regenerating the eval

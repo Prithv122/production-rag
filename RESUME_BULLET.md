@@ -2,7 +2,7 @@
 
 Form: **action → technical specifics → measured outcome.** Numbers or it doesn't go on the resume.
 
-> Retrieval bullets are final. A generation/deployment bullet lands in session 3.
+> Retrieval and generation bullets are final.
 
 ---
 
@@ -36,6 +36,27 @@ Form: **action → technical specifics → measured outcome.** Numbers or it doe
   sorted JSONL bundles and `eval --replay` turns a cache miss into an error, verified with an
   empty API key and an unreachable local model server.
 
+- Scored generated answers **without an LLM judge** — citation validity, grounding against
+  existing span labels, and refusal recall paired with false-refusal rate — then used it as a
+  controlled test: `qwen2.5-coder:7b` vs `qwen2.5:7b` at identical size, quantisation, prompt
+  and frozen retrieved context grounded **0.478 vs 0.341** overall and **0.786 vs 0.500** on
+  exact-terminology questions, isolating instruction tuning as the cause.
+
+- Traced a 0.977 uncited-answer rate to my own prompt rather than the models — the rules
+  demanded `[n]` citations while the output example showed none — and cut it to **0.174–0.390**
+  with a one-line change, a larger effect than the entire best-to-worst model gap.
+
+- Caught and retracted a published attribution by auditing the committed response cache:
+  **279 of 337 calls (83%)** credited to a 120B hosted model had silently been answered by a
+  local 7B via the provider fallback chain; added `fell_back` reporting, disabled fallback
+  inside the evaluation, and shipped a `cache audit` command that exits non-zero on any
+  requested-vs-answered model mismatch.
+
+- Put an error bar on the project's own tables: bootstrap resampling showed a 60-question
+  subset moves recall@5 by **±0.10 at 95%**, wider than the gaps between most arms — which
+  reframed the result as the arm *ordering* rather than the third decimal, and caught that a
+  partially-verified question set was an ordered prefix rather than a random sample.
+
 ## Which roles this supports
 
 - [ ] Data Scientist / ML
@@ -51,7 +72,9 @@ RAG · hybrid retrieval · BM25 (Okapi, implemented) · dense retrieval · sente
 bge-small-en-v1.5 · cross-encoder reranking · reciprocal rank fusion · score fusion ·
 query rewriting · retrieval evaluation (recall@k, nDCG, MRR, hit-rate) · ground-truth labelling ·
 chunking strategies · scipy sparse · numpy · OpenRouter · Ollama · provider abstraction ·
-fallback and graceful degradation · response caching and offline replay · pytest · ruff · uv · CI
+fallback and graceful degradation · response caching and offline replay · citation grounding ·
+refusal/abstention evaluation · prompt engineering (measured) · bootstrap confidence intervals ·
+experiment provenance auditing · Gradio · Hugging Face Hub · pytest · ruff · uv · CI
 
 ---
 
