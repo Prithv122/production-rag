@@ -198,6 +198,16 @@ class ArmSummary:
     uncited_rate: float
     parse_failure: float
     provider_error: float
+    fell_back: float
+    """Share of this arm's rows actually answered by a *different* model.
+
+    `build_provider` puts a fallback chain behind the named model, which is a
+    feature everywhere except here: an arm labelled `nemotron-super` whose calls
+    silently degraded to the local Ollama would be a comparison between two
+    models reported as one. The per-row `model` field records which model
+    actually spoke, and this is that disagreement, surfaced next to the metrics
+    rather than left in the rows for nobody to find."""
+
     median_latency_s: float
     completion_tokens: float
 
@@ -232,6 +242,7 @@ def summarise(rows: Sequence[AnswerRow], *, arm: str, model: str) -> ArmSummary:
         provider_error=rate(
             sum(1 for r in rows if r.refusal_reason == "provider_error"), len(rows)
         ),
+        fell_back=rate(sum(1 for r in rows if r.model and r.model != model), len(rows)),
         median_latency_s=statistics.median(latencies) if latencies else 0.0,
         completion_tokens=statistics.fmean([r.completion_tokens for r in rows]) if rows else 0.0,
     )
@@ -322,8 +333,8 @@ def run_grid(
 def format_table(summaries: Sequence[ArmSummary]) -> str:
     header = (
         "| Arm | model | refusal recall | false refusal | grounded | "
-        "citation validity | uncited | unparseable | median s |\n"
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|"
+        "citation validity | uncited | unparseable | fell back | median s |\n"
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"
     )
     lines = [header]
     for s in summaries:
@@ -331,7 +342,7 @@ def format_table(summaries: Sequence[ArmSummary]) -> str:
             f"| `{s.arm}` | {s.model.split('/')[-1]} | "
             f"{s.refusal_recall:.3f} | {s.false_refusal:.3f} | {s.grounded:.3f} | "
             f"{s.citation_validity:.3f} | {s.uncited_rate:.3f} | {s.parse_failure:.3f} | "
-            f"{s.median_latency_s:.1f} |"
+            f"{s.fell_back:.3f} | {s.median_latency_s:.1f} |"
         )
     return "\n".join(lines)
 

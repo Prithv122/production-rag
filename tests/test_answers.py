@@ -251,3 +251,16 @@ def test_run_grid_feeds_every_arm_identical_context(tmp_path):
 def test_format_by_category_shows_a_dash_when_a_category_is_empty():
     rendered = format_by_category([row(category="conceptual")])
     assert "--" in rendered
+
+
+def test_a_silent_fallback_to_another_model_is_surfaced_not_buried():
+    rows = [row(model="nemotron"), row(model="nemotron"), row(model="qwen-local")]
+    s = summarise(rows, arm="a", model="nemotron")
+    assert s.fell_back == pytest.approx(1 / 3)
+    assert "fell back" in format_table([s])
+
+
+def test_rows_with_no_model_recorded_do_not_count_as_a_fallback():
+    # A refusal taken before any call (no context, low score) has no model.
+    rows = [row(model=""), row(model="nemotron")]
+    assert summarise(rows, arm="a", model="nemotron").fell_back == 0.0
