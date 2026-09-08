@@ -230,33 +230,41 @@ lengths is roughly linear in token count, so a ~20× longer input is roughly ~20
 **Throughput per *text* is a meaningless unit for an encoder; throughput per *token* is
 the one that transfers.**
 
-### The two strategies became an accidental natural experiment
+### The three strategies became an accidental natural experiment
 
-Building `fixed` and `heading` over the *same corpus* with the *same encoder* — differing
-only in how the text was cut up — separates the two candidate units cleanly:
+Building all three over the *same corpus* with the *same encoder* on the *same hardware* —
+differing only in how the text was cut up — separates the two candidate units cleanly:
 
 | Strategy | Chunks | Mean chars | Build | **chunks/s** | **tokens/s** |
 |---|---:|---:|---:|---:|---:|
-| `fixed` | 14,660 | 997 | ~41 min | **6.0** | **1,486** |
-| `heading` | 22,789 | 536 | ~37 min | **10.3** | **1,377** |
+| `fixed` | 14,660 | 997 | 40.8 min | **6.0** | **1,494** |
+| `heading` | 22,789 | 536 | 37.0 min | **10.3** | **1,375** |
+| `heading_ctx` | 24,120 | 680 | 48.9 min | **8.2** | **1,397** |
 
-Per-chunk throughput differs by **1.7×**. Per-token throughput differs by **8%**. Same
-hardware, same model, same corpus. That is about as direct a demonstration as this project
-will produce that the encoder's cost is set by tokens and the "texts per second" figure is
-an artefact of whatever text length you happened to benchmark on.
+Per-chunk throughput spans **1.7×**. Per-token throughput spans **8%** — and note the
+ordering: `heading_ctx` sits between the other two on both mean chunk length and chunks/s,
+exactly where a token-linear cost model puts it. That is about as direct a demonstration as
+this project will produce that the encoder's cost is set by tokens, and that "texts per
+second" is an artefact of whatever text length you happened to benchmark on.
 
 It also retroactively explains the original error exactly: the toy benchmark used ~12-token
-strings and reported 160 texts/s ≈ 1,900 tokens/s — the token figure was roughly right all
+strings and reported 160 texts/s ≈ 1,900 tokens/s. The token figure was roughly right all
 along. Only the unit was wrong.
 
-The payoff for the build cost is in README §5: a few milliseconds for an exact full-scan
-query over every vector. Embedding is slow once; searching is fast forever, which is
-precisely why an approximate index would be buying nothing at this scale.
+Total: **127 minutes** for the full three-strategy grid, which is the cost the session-2
+content-hash cache is meant to avoid paying repeatedly.
 
-**Caveat on the latency figures.** The same `fixed` index measured 2.38 ms idle and 3.43 ms
-while the `heading_ctx` build was saturating five cores. Query latency here is memory-
-bandwidth bound, so it is sensitive to contention; the README figures are re-measured on an
-idle machine after all builds complete, and that condition is stated alongside them.
+### The latency number moved three times, and the third one is right
+
+The same `fixed` index measured **2.38 ms**, then **3.43 ms**, then **1.07 ms**. Nothing
+about the index changed; only the machine's load did — the first two were taken while other
+strategies were still embedding on five cores. Exact search is memory-bandwidth bound, so
+it is far more load-sensitive than a CPU-bound operation would be.
+
+The lesson is not subtle but it is easy to skip: **a latency figure without a stated machine
+condition is not a measurement.** The README now reports idle-machine means over 500
+queries and says so. The first two figures were published in this repository before being
+corrected; they are recorded here rather than quietly overwritten.
 
 Consequence: a full three-strategy rebuild is slow enough to make the chunking × arm grid
 painful to iterate on. Fixes for session 2, in order of value:
