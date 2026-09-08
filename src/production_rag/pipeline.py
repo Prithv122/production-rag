@@ -15,6 +15,9 @@ So the composition lives here, once, as data:
 ``hybrid``              Both, fused by reciprocal rank.
 ``hybrid_score``        Both, fused by normalised score. Tests whether keeping
                         magnitude information beats discarding it for rank.
+``hybrid_weighted``     RRF again, but the lexical arm counts double. Equal
+``hybrid_score_weighted`` weighting gives a weak arm as many votes as a strong
+                        one; these two ask what that costs.
 ``hybrid_rerank``       Hybrid, then a cross-encoder over the pool.
 ``rerank_rewrite``      ...plus LLM query expansion (original + variants).
 ``rerank_rewrite_only`` ...but retrieving with the rewrite *instead of* the
@@ -62,6 +65,14 @@ class ArmSpec:
     rewrite: str = ""
     """`""`, `"expand"` or `"replace"` -- see :mod:`production_rag.rewrite`."""
 
+    weights: tuple[float, ...] = ()
+    """Per-arm fusion weights, lexical first. Empty means equal weighting.
+
+    Equal weighting is the textbook default and it is not obviously right: RRF
+    gives a weak arm exactly as many votes as a strong one, so a dense arm that
+    is 20 points worse still gets to dilute the lexical ranking. Whether that
+    costs anything is measurable, so it is an arm rather than an assumption."""
+
     @property
     def needs_dense(self) -> bool:
         return self.semantic
@@ -76,6 +87,8 @@ ARMS: dict[str, ArmSpec] = {
     "dense": ArmSpec(lexical=False, semantic=True),
     "hybrid": ArmSpec(fusion="rrf"),
     "hybrid_score": ArmSpec(fusion="score"),
+    "hybrid_weighted": ArmSpec(fusion="rrf", weights=(2.0, 1.0)),
+    "hybrid_score_weighted": ArmSpec(fusion="score", weights=(2.0, 1.0)),
     "hybrid_rerank": ArmSpec(fusion="rrf", rerank=True),
     "rerank_rewrite": ArmSpec(fusion="rrf", rerank=True, rewrite="expand"),
     "rerank_rewrite_only": ArmSpec(fusion="rrf", rerank=True, rewrite="replace"),
@@ -83,7 +96,15 @@ ARMS: dict[str, ArmSpec] = {
 
 #: Arms that need neither an API key nor a network connection. Everything in
 #: this list reproduces from a clean clone with the indexes rebuilt.
-OFFLINE_ARMS = ("bm25", "dense", "hybrid", "hybrid_score", "hybrid_rerank")
+OFFLINE_ARMS = (
+    "bm25",
+    "dense",
+    "hybrid",
+    "hybrid_score",
+    "hybrid_weighted",
+    "hybrid_score_weighted",
+    "hybrid_rerank",
+)
 
 
 @dataclass
@@ -204,7 +225,8 @@ class Retriever:
             # `k=pool` here, not `k`: fusion feeds the reranker, and truncating
             # to 10 before reranking would throw away exactly the candidates the
             # reranker exists to rescue.
-            candidates = fuse(rankings, spec.fusion, k=pool)
+            weights = list(spec.weights) * (len(rankings) // max(len(spec.weights), 1)) or None
+            candidates = fuse(rankings, spec.fusion, k=pool, weights=weights)
 
         pool_size = len(candidates)
         if spec.rerank:

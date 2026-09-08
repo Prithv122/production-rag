@@ -8,10 +8,13 @@
 **Live demo:** _pending — Hugging Face Space, session 3_
 **Stack:** Python 3.12 · scipy sparse (own BM25) · sentence-transformers · OpenRouter + Ollama · Gradio
 
-> **Status: session 1 of 3 complete.** Ingest, chunking, BM25, dense retrieval, fusion and
-> the metric definitions are built and tested. Retrieval result tables land in session 2,
-> once ground truth exists; generation and the deployed demo in session 3. Sections marked
-> _pending_ are honestly empty rather than filled with placeholders.
+> **Status: session 2 of 3 complete.** Retrieval is built, evaluated and reported: seven
+> arms across three chunking strategies against a 184-question span-labelled evaluation set,
+> plus a cross-encoder reranker, query rewriting as a measured arm, and a provider
+> abstraction with a fallback chain. **The question set has not yet been human-verified** —
+> that pass and answer generation are session 3, and the tables will be re-cut on the
+> verified subset. Sections marked _pending_ are honestly empty rather than filled with
+> placeholders.
 
 ---
 
@@ -216,21 +219,169 @@ that its labelled passage is really the best evidence; only someone who knows th
 say that. `production-rag verify` walks the set and records accept / edit / reject with the
 correction rate, and the headline table is restricted to the verified subset.
 
-### Retrieval quality — _measurement in progress_
+### Retrieval quality — measured
 
-Arms (BM25 · dense · hybrid-RRF · hybrid-score · +rerank · +rewrite-expand ·
-+rewrite-replace) × 3 chunking strategies, **broken down by question category** rather than
-pooled: a single mean over a set whose category mix the reporter chose is a number about
-the mix.
+184 questions (174 LLM-proposed and screened, 10 hand-written), `k = 10`, candidate pool 50,
+scored against document-span labels resolved per strategy. Evidence maps onto 100% / 99.4% /
+99.4% of questions for `fixed` / `heading` / `heading_ctx`, so the three columns are scored
+on the same set.
 
-Recorded in advance, to be checked against the measurement: query rewriting is expected to
-*hurt* exact-terminology queries — paraphrasing destroys the literal token BM25 matches on
-— and help conceptual and cross-tool ones. If so the conclusion is "rewrite conditionally",
-not "rewriting improves retrieval." The `expand` and `replace` arms exist to separate those
-two possibilities: `expand` keeps the original query in the fusion, so it can add a passage
-but cannot remove the literal match; `replace` cannot.
+> **Read the caveats before the numbers.** The questions have **not yet been human-verified**
+> — that pass is session 3, and the table will be re-cut on the verified subset. And the bulk
+> of the set was written by a model *from a passage it had just read*, which structurally
+> flatters lexical retrieval: the question tends to reuse vocabulary the passage contains.
+> That bias inflates the BM25 column specifically. The `conceptual` split, where the
+> generator was instructed to avoid the passage's distinctive terms, is the more trustworthy
+> comparison, and the hand-written cross-tool questions are the least contaminated of all.
 
-### Answer quality — _pending, session 2_
+**recall@5**
+
+| Arm | fixed | heading | heading_ctx |
+|---|---:|---:|---:|
+| `bm25` | 0.697 | 0.695 | 0.666 |
+| `dense` | 0.485 | 0.555 | 0.531 |
+| `hybrid` (RRF) | 0.659 | 0.688 | 0.645 |
+| `hybrid_score` | 0.697 | 0.703 | 0.679 |
+| `hybrid_weighted` (RRF, lexical ×2) | 0.667 | 0.689 | 0.639 |
+| **`hybrid_score_weighted`** | **0.716** | 0.706 | 0.684 |
+
+**nDCG@10**
+
+| Arm | fixed | heading | heading_ctx |
+|---|---:|---:|---:|
+| `bm25` | 0.619 | 0.631 | 0.635 |
+| `dense` | 0.435 | 0.499 | 0.450 |
+| `hybrid` (RRF) | 0.578 | 0.602 | 0.576 |
+| `hybrid_score` | 0.612 | 0.628 | 0.606 |
+| `hybrid_weighted` | 0.588 | 0.619 | 0.598 |
+| **`hybrid_score_weighted`** | 0.633 | **0.658** | 0.632 |
+
+#### Four results I did not expect to have to write
+
+**1. Plain RRF hybrid is worse than BM25 alone.** 0.688 vs 0.695 recall@5 on `heading`, and
+0.602 vs 0.631 nDCG@10 — the default hybrid configuration, the one most RAG tutorials ship,
+*loses* to the lexical arm on its own. The mechanism is visible in the fusion: unweighted RRF
+gives the dense arm exactly as many votes as the lexical one, and the dense arm is 14 points
+of recall worse here. It does not add signal, it dilutes it. "Hybrid beats single-arm" is a
+claim about a corpus, not a law.
+
+**2. Score fusion beats RRF everywhere**, on every strategy and both metrics. Session 1
+implemented both rather than picking one, on the grounds that BM25's true-zero floor and
+cosine's rank-everything behaviour interact with fusion in a way that is empirical rather
+than obvious. Discarding the scores costs about 2.5 nDCG points here.
+
+**3. Weighting the lexical arm ×2 is what actually makes hybrid worth running.**
+`hybrid_score_weighted` is the only arm that clearly beats BM25 alone on both metrics
+(0.706 / 0.658 vs 0.695 / 0.631 on `heading`). Weighting rescues score fusion; it improves
+RRF without rescuing it (0.619 nDCG, still under BM25). A single 2× weight — one number,
+one line of config — is worth more than the entire dense arm was on its own.
+
+**4. `heading_ctx` is worse than `heading`.** Prefixing the heading breadcrumb onto the
+embedded text is the one thing that arm exists to test, and it costs 2–4 points of recall on
+every arm. The breadcrumb is mostly repeated boilerplate across a page's sections, so it adds
+near-identical text to every chunk of a document — which is exactly the wrong thing to do to
+a bag-of-terms index and to a similarity search alike. `heading` wins nDCG and `fixed` edges
+recall@5; `heading` is the default.
+
+#### The split the pooled mean hides
+
+recall@5 on `heading`, by question category:
+
+| Arm | exact_term (n=53) | conceptual (n=121) | cross_tool (n=4) |
+|---|---:|---:|---:|
+| `bm25` | **0.933** | 0.616 | 0.000 |
+| `dense` | 0.712 | 0.506 | 0.000 |
+| `hybrid` (RRF) | 0.913 | 0.614 | 0.000 |
+| `hybrid_score` | 0.904 | **0.640** | 0.000 |
+| `hybrid_weighted` | **0.933** | 0.607 | 0.000 |
+| `hybrid_score_weighted` | **0.933** | 0.632 | 0.000 |
+
+BM25 alone is unbeatable on exact-terminology questions — nothing improves on 0.933, and
+three arms merely tie it. On conceptual questions the ordering inverts and *unweighted* score
+fusion wins, because that is the regime where the dense arm's opinion is worth having and
+weighting it down throws away the thing that helps. A single pooled number over this set
+would report whichever category the set happens to contain more of, and I chose that mix.
+
+**Cross-tool questions score 0.000 for every arm.** These are the four hand-written questions
+whose answer genuinely requires two tools' documentation at once, and recall counts a
+question as fully answered only when *both* spans are retrieved. I checked the labels rather
+than assuming: issuing the gold quote itself as a query returns its chunk at **rank 1**, so
+the labels are correct and reachable — the questions are simply beyond every arm here. The
+best BM25 rank for any gold chunk was 183 on one question and outside the top 500 on another.
+n = 4, so this is a signal to build more of them, not a measurement.
+
+### Reranking and query rewriting — measured on `heading`
+
+Run on the single winning strategy rather than all three: the cross-encoder is CPU-bound at a
+measured **7.45 pairs/s** on this machine, so the full grid is hours of compute for a
+comparison that is orthogonal to chunking. Stating the reason beats quietly dropping rows.
+
+| Arm | recall@5 | nDCG@10 | MRR | wall clock |
+|---|---:|---:|---:|---:|
+| `hybrid` (RRF, no rerank) | 0.688 | 0.602 | 0.561 | 7 s |
+| `hybrid_score_weighted` (best first-stage) | 0.706 | 0.658 | — | 9 s |
+| `hybrid_rerank` | 0.713 | 0.662 | 0.629 | 781 s |
+| **`rerank_rewrite`** (expand) | **0.730** | **0.665** | **0.630** | 271 s |
+| `rerank_rewrite_only` (replace) | 0.685 | 0.622 | 0.595 | 226 s |
+
+**The cross-encoder earns its cost, and the cost is the whole story.** Reranking lifts the
+RRF hybrid by 6 nDCG points (0.602 → 0.662) — the largest single improvement in the project.
+It also takes **110× longer** than the arm it improves, and gets almost all the way there
+without a second stage at all: `hybrid_score_weighted`, which is one weight and one fusion
+choice, reaches 0.658 nDCG in 9 seconds. The reranker's remaining margin over it is
+**0.004 nDCG for 87× the latency**. On this corpus, at this scale, tuning the fusion is the
+better engineering decision and the cross-encoder is the thing you add when you have already
+done that and need the last half-point.
+
+(The rewrite arms' wall clock is lower than `hybrid_rerank`'s only because they ran second
+and reused its cached cross-encoder scores. Rewrite latency here is a cache read; the real
+per-call figure is a **median 65 s** on the free tier, and it is in the cached responses.)
+
+#### The pre-registered prediction was half right, and the half that was wrong is more useful
+
+Recorded in session 1, before any of this ran: *query rewriting will hurt exact-terminology
+queries — paraphrasing destroys the literal token BM25 matches on — and help conceptual and
+cross-tool ones.*
+
+recall@5 on `heading`, by category:
+
+| Arm | exact_term (n=53) | conceptual (n=121) | cross_tool (n=4) |
+|---|---:|---:|---:|
+| `hybrid_rerank` (no rewrite) | 0.894 | 0.659 | 0.000 |
+| `rerank_rewrite` (expand) | 0.894 | **0.684** | 0.000 |
+| `rerank_rewrite_only` (replace) | **0.913** | 0.605 | **0.125** |
+
+**Right about `expand`.** Keeping the original query in the fusion leaves exact-terminology
+questions exactly where they were (0.894 → 0.894) and adds 2.5 points on conceptual ones
+(0.659 → 0.684). A variant can add a passage; it cannot remove the literal match. That is
+what the arm was designed to do and it did it.
+
+**Wrong about `replace`, and wrong in a specific way.** Retrieving with the rewrite *instead
+of* the original was supposed to be where paraphrase damage showed up on exact-terminology
+queries. It went the other way: 0.894 → **0.913**, the best exact-terminology score of any
+arm in the project. The explanation is in the prompt — it forbids paraphrasing identifiers,
+so the model keeps `on_schema_change` verbatim and discards the surrounding filler
+("how do I", "is there a way to"). The result is a query that is *more* concentrated on the
+rare token BM25 keys on. The instruction that was written to make the comparison fair turned
+out to be the mechanism.
+
+The damage landed somewhere else entirely: **conceptual questions lost 5.4 points**
+(0.659 → 0.605). Replacing a user's own phrasing with one model guess throws away the
+diversity that `expand`'s fusion provides — and conceptual queries are exactly where a single
+guess is most likely to be the wrong guess.
+
+**And `replace` is the only arm that ever scored on cross-tool questions** (0.125 — one of
+four questions retrieving one of its two required spans). n = 4, so it is a hint rather than
+a result, but it is the plausible direction: a question spanning two tools needs its
+vocabulary moved, not preserved.
+
+The honest conclusion is therefore not "rewriting improves retrieval" and not "rewriting
+hurts exact-terminology queries" either. It is: **expand, don't replace — unless the query
+is conceptual or cross-tool, where replacing is the only thing that moved the needle.** A
+pooled mean over this set would have reported `expand` as a 1.7-point win and buried
+everything above.
+
+### Answer quality — _pending, session 3_
 
 Faithfulness, citation correctness, refusal accuracy, JSON parse rate, latency and cost,
 across `nemotron-3-super:free`, `nemotron-3-ultra:free`, `gemini-2.5-flash-lite` and local
