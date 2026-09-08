@@ -86,3 +86,54 @@ def test_embedding_cache_is_keyed_by_model(tmp_path):
     a.encode_documents(["shared"])
     b.encode_documents(["shared"])
     assert b.hits == 0
+
+
+def test_bundle_round_trips_through_one_file(tmp_path):
+    source = JsonCache(tmp_path / "a")
+    source.put({"prompt": "one"}, {"text": "first"})
+    source.put({"prompt": "two"}, {"text": "second"})
+
+    bundle = tmp_path / "bundle.jsonl"
+    assert source.export_jsonl(bundle) == 2
+
+    restored = JsonCache(tmp_path / "b")
+    assert restored.import_jsonl(bundle) == 2
+    assert restored.get({"prompt": "two"}) == {"text": "second"}
+
+
+def test_the_bundle_is_sorted_so_diffs_stay_readable(tmp_path):
+    cache = JsonCache(tmp_path / "a")
+    for i in range(5):
+        cache.put({"prompt": f"p{i}"}, {"text": str(i)})
+    bundle = tmp_path / "bundle.jsonl"
+    cache.export_jsonl(bundle)
+    lines = bundle.read_text(encoding="utf-8").splitlines()
+
+    second = JsonCache(tmp_path / "b")
+    second.import_jsonl(bundle)
+    second.export_jsonl(tmp_path / "again.jsonl")
+    assert (tmp_path / "again.jsonl").read_text(encoding="utf-8").splitlines() == lines
+
+
+def test_import_does_not_clobber_a_fresher_local_entry(tmp_path):
+    """A local run may hold a newer response than the committed bundle;
+    replacing it silently would change numbers already checked."""
+    bundle = tmp_path / "bundle.jsonl"
+    JsonCache(tmp_path / "a").put({"prompt": "p"}, {"text": "old"})
+    JsonCache(tmp_path / "a").export_jsonl(bundle)
+
+    local = JsonCache(tmp_path / "b")
+    local.put({"prompt": "p"}, {"text": "new"})
+    assert local.import_jsonl(bundle) == 0
+    assert local.get({"prompt": "p"}) == {"text": "new"}
+
+    assert local.import_jsonl(bundle, overwrite=True) == 1
+    assert local.get({"prompt": "p"}) == {"text": "old"}
+
+
+def test_a_corrupt_entry_does_not_break_the_export(tmp_path):
+    cache = JsonCache(tmp_path / "a")
+    cache.put({"prompt": "good"}, {"text": "ok"})
+    (tmp_path / "a" / "zz").mkdir(parents=True)
+    (tmp_path / "a" / "zz" / "broken.json").write_text("{oops", encoding="utf-8")
+    assert cache.export_jsonl(tmp_path / "bundle.jsonl") == 1
