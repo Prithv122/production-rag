@@ -19,8 +19,10 @@ ambiguity — which is what makes hybrid + reranking meaningful rather than deco
 ## Stack
 
 Python 3.12 · scipy sparse (own BM25) · sentence-transformers (bge-small-en-v1.5, exact
-numpy search — no ANN at this corpus size) · cross-encoder reranker · OpenRouter via the
-OpenAI-compatible client, Ollama fallback · Pydantic answer contract · Gradio on HF Spaces.
+numpy search — no ANN at this corpus size) · cross-encoder reranker
+(ms-marco-MiniLM-L-6-v2) · OpenRouter's OpenAI-compatible endpoint over stdlib `urllib`
+(no client library — Ollama's endpoint is a different shape anyway), Ollama fallback
+(`qwen2.5:7b-instruct-q3_K_M`) · Pydantic answer contract · Gradio on HF Spaces.
 
 ## Acceptance criteria
 

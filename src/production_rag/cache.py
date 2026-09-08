@@ -112,6 +112,49 @@ class JsonCache:
     def __len__(self) -> int:
         return sum(1 for _ in self.root.rglob("*.json"))
 
+    # -- bundling ---------------------------------------------------------
+    #
+    # A sharded directory is the right shape for *writing* under concurrency and
+    # the wrong shape for a git repository: hundreds of two-hex-character
+    # directories holding one file each is unreadable in a diff and unpleasant
+    # in a clone. But replay has to work from a clean clone or it is not really
+    # replay -- "reproducible with the author's local cache" is not a property
+    # anyone else can check. So the cache ships as one sorted JSONL file per
+    # cache, and is expanded on import.
+    def export_jsonl(self, path: Path) -> int:
+        """Write every entry to one sorted, diffable file."""
+        entries = []
+        for entry_path in sorted(self.root.rglob("*.json")):
+            try:
+                entries.append(json.loads(entry_path.read_text(encoding="utf-8")))
+            except (json.JSONDecodeError, OSError):
+                continue
+        entries.sort(key=lambda e: stable_hash(e["key"]))
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8", newline="\n") as handle:
+            for entry in entries:
+                handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+        return len(entries)
+
+    def import_jsonl(self, path: Path, *, overwrite: bool = False) -> int:
+        """Expand a bundle back into the sharded cache. Existing entries win.
+
+        Not overwriting by default is deliberate: a local run may hold a fresher
+        response than the committed bundle, and silently replacing it would
+        change numbers the author has already checked.
+        """
+        written = 0
+        with Path(path).open(encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                entry = json.loads(line)
+                if overwrite or not self.path_for(entry["key"]).exists():
+                    self.put(entry["key"], entry["value"])
+                    written += 1
+        return written
+
 
 class CachedEmbedder:
     """Wraps an :class:`~production_rag.dense.Embedder`, memoising by text hash.

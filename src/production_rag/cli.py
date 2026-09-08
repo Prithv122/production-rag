@@ -230,7 +230,7 @@ def cmd_propose(args: argparse.Namespace) -> int:
     # shared `seen` set, and deduplication that depends on completion order
     # would make the eval set depend on network timing. So calls fan out and
     # results are folded back in passage order.
-    def _call(passage):
+    def _call(passage, max_tokens):
         document = documents.get(passage.doc_id)
         if document is None:  # pragma: no cover - only if docs and chunks disagree
             return passage, None, [], ""
@@ -240,30 +240,50 @@ def cmd_propose(args: argparse.Namespace) -> int:
             provider,
             n=args.per_passage,
             structured=spec["structured"],
-            max_tokens=args.max_tokens,
+            max_tokens=max_tokens,
         )
         return passage, document, proposals, error
 
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        for i, (passage, document, proposals, error) in enumerate(
-            pool.map(_call, passages), start=1
-        ):
-            if document is None:
-                continue
-            if error:
-                stats.rejected_unparseable += 1
-                stats.errors.append(error)
-            accepted.extend(
-                screen_proposals(
-                    proposals, passage, document, model=spec["model"], seen=seen, stats=stats
+    def _pass(batch, max_tokens, label):
+        failed = []
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            for i, (passage, document, proposals, error) in enumerate(
+                pool.map(lambda p: _call(p, max_tokens), batch), start=1
+            ):
+                if document is None:
+                    continue
+                if error:
+                    failed.append(passage)
+                    stats.errors.append(error)
+                accepted.extend(
+                    screen_proposals(
+                        proposals, passage, document, model=spec["model"], seen=seen, stats=stats
+                    )
                 )
-            )
-            if i % 10 == 0 or i == len(passages):
-                print(
-                    f"  {i:4}/{len(passages)} passages · {stats.accepted:4} accepted · "
-                    f"{stats.rejected_no_quote} bad quote · {stats.rejected_duplicate} dup",
-                    flush=True,
-                )
+                if i % 10 == 0 or i == len(batch):
+                    print(
+                        f"  {label} {i:4}/{len(batch)} · {stats.accepted:4} accepted · "
+                        f"{len(failed)} failed · {stats.rejected_no_quote} bad quote · "
+                        f"{stats.rejected_duplicate} dup",
+                        flush=True,
+                    )
+        return failed
+
+    failed = _pass(passages, args.max_tokens, "pass 1")
+
+    # A reasoning model can spend its entire token budget on a preamble and stop
+    # with finish=length before emitting a character of JSON -- measured at
+    # roughly a third of calls at 1600 tokens. Retrying only the failures with a
+    # larger budget costs one extra call per failure instead of re-running the
+    # whole set, and the successful responses stay served from cache.
+    if failed and args.retry_multiplier > 1:
+        budget = args.max_tokens * args.retry_multiplier
+        print(f"\nretrying {len(failed)} failed passages at {budget} tokens")
+        still_failed = _pass(failed, args.max_tokens * args.retry_multiplier, "pass 2")
+        stats.rejected_unparseable = len(still_failed)
+        stats.recovered_on_retry = len(failed) - len(still_failed)
+    else:
+        stats.rejected_unparseable = len(failed)
 
     # The hand-written cross-tool and unanswerable questions are merged in from
     # their own file. They are the part of the set no passage-sampling loop can
@@ -367,6 +387,43 @@ def cmd_verify(args: argparse.Namespace) -> int:
     print(f"\n{done} decided this session. Totals: {counts}")
     if reviewed:
         print(f"correction rate: {corrected}/{reviewed} = {corrected / reviewed:.1%}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# cache -- bundle the LLM and rerank caches so replay works from a clean clone
+# ---------------------------------------------------------------------------
+LLM_BUNDLE = Path("eval/cache/llm.jsonl")
+RERANK_BUNDLE = Path("eval/cache/rerank.jsonl")
+
+CACHES = {
+    "llm": (Path(".cache/llm"), LLM_BUNDLE),
+    "rerank": (RERANK_CACHE, RERANK_BUNDLE),
+}
+
+
+def cmd_cache(args: argparse.Namespace) -> int:
+    """Export the committed caches, or expand them after a clone.
+
+    The embedding cache is deliberately absent: it is 24,000 float32 vectors and
+    belongs in a rebuild, not in git. The LLM and rerank caches are small,
+    and without them `eval --replay` is only reproducible on the machine that
+    produced the numbers -- which is not reproducible.
+    """
+    from .cache import JsonCache
+
+    for name, (root, bundle) in CACHES.items():
+        cache = JsonCache(root)
+        if args.action == "export":
+            if not root.exists():
+                print(f"{name:8} no local cache at {root}")
+                continue
+            print(f"{name:8} exported {cache.export_jsonl(bundle):,} entries -> {bundle}")
+        else:
+            if not bundle.exists():
+                print(f"{name:8} no bundle at {bundle}")
+                continue
+            print(f"{name:8} imported {cache.import_jsonl(bundle):,} new entries -> {root}")
     return 0
 
 
@@ -511,6 +568,12 @@ def build_parser() -> argparse.ArgumentParser:
         "its preamble and finish with reason=length before emitting any JSON",
     )
     propose.add_argument(
+        "--retry-multiplier",
+        type=int,
+        default=3,
+        help="retry failed passages once at this multiple of --max-tokens (0 to disable)",
+    )
+    propose.add_argument(
         "--workers",
         type=int,
         default=6,
@@ -548,6 +611,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_component_args(evaluate)
     evaluate.set_defaults(func=cmd_eval)
+
+    cache = subparsers.add_parser("cache", help="bundle or restore the replay caches")
+    cache.add_argument("action", choices=["export", "import"])
+    cache.set_defaults(func=cmd_cache)
 
     return parser
 

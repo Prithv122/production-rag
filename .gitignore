@@ -54,3 +54,9 @@ indexes/
 
 # Generation cache holds prompt hashes + responses; results/ is committed on purpose
 .cache/models/
+
+# Replay caches. The LLM and cross-encoder caches are exported to
+# eval/cache/*.jsonl and committed on purpose -- without them `eval --replay`
+# only reproduces on the machine that produced the numbers. The sharded working
+# copies, and the embedding cache (24k float32 vectors), are not committed.
+.cache/

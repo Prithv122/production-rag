@@ -98,6 +98,12 @@ flowchart TB
 | Fusion | RRF **and** score fusion, both measured | Picking one | BM25 has a true zero floor (absent); cosine ranks everything (less similar). Which fusion handles that better is empirical |
 | Chunk sizing | Characters | Tokens | A token budget drags the encoder's tokenizer — and torch — into every test |
 | Agent loop | Excluded | LangGraph / tool loop | That is project 43. A repo that is simultaneously a RAG system, an agent and an eval framework demonstrates none of them |
+| **Ground truth unit** | A character span in a document | A gold chunk id | Chunk ids are not shared between the three strategies. Span labels are chunked *per strategy* at scoring time, so one labelling effort yields three comparable evaluations and the labels survive a change to the chunk size |
+| **Question category** | Computed from corpus document frequency | The generating model's own label | A model asked to write a conceptual question and then to say whether it did will say yes. "Does the question share a rare token with its own evidence?" is checkable; the model's opinion of itself is not |
+| **Reranker** | `ms-marco-MiniLM-L-6-v2` (22M) | `bge-reranker-base` (278M) | Reranking the pool is the most repeated operation in the grid. Picking the model that scores higher on a leaderboard without pricing it is the reasoning this project exists to avoid |
+| **Rewrite arms** | `expand` (original + variants) **and** `replace` | One rewrite arm | `expand` keeps the literal query in the fusion so a paraphrase can add a passage but not remove one; `replace` cannot. Running both is what turns a prediction into a measurement |
+| **LLM client** | stdlib `urllib` against the OpenAI-compatible endpoint | The `openai` package | Ollama's native endpoint is a different shape, so a client library covers one of two providers and the second is hand-written anyway — for a dependency tree on the offline retrieval path |
+| **Replay caches** | Exported to one JSONL each and committed | Gitignored, or a sharded directory in git | "Reproducible with the author's local cache" is not reproducible. The caches are small; the embedding cache (24k float32 vectors) is not, and stays out |
 
 ## 5. Results
 

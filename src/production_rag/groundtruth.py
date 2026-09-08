@@ -426,6 +426,12 @@ class ProposalStats:
     rejected_context_dependent: int = 0
     rejected_too_short: int = 0
     rejected_duplicate: int = 0
+    recovered_on_retry: int = 0
+    """Passages that failed on the first attempt and succeeded with a larger
+    token budget. Reported because it is the size of the problem, not a detail:
+    a third of calls to a model advertised as supporting structured output
+    never reached the JSON at all."""
+
     accepted: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -498,7 +504,11 @@ def propose_from_passage(
     try:
         data = extract_json(response.text)
     except ValueError as exc:
-        return [], f"{chunk.chunk_id}: unparseable: {exc}"
+        # The finish reason is the diagnosis. `length` means the model spent its
+        # whole budget on a reasoning preamble and never reached the JSON, which
+        # a larger budget fixes; `stop` means it finished and the output was
+        # genuinely not JSON, which a larger budget will not fix.
+        return [], f"{chunk.chunk_id}: unparseable (finish={response.finish_reason}): {exc}"
 
     if isinstance(data, dict):
         data = data.get("questions", [])
