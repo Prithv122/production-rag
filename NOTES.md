@@ -230,16 +230,33 @@ lengths is roughly linear in token count, so a ~20× longer input is roughly ~20
 **Throughput per *text* is a meaningless unit for an encoder; throughput per *token* is
 the one that transfers.**
 
-**Measured, once the first build actually finished:** the `fixed` index — 14,660 chunks —
-took **~40 minutes** on CPU. That is **~6 chunks/s**, or roughly **1.5k tokens/s**, against
-the 160 texts/s the toy benchmark promised. The other two strategies are larger (22,789 and
-24,120 chunks) and are still building; their times are not stated here until they are
-timed, because the earlier mistake in this section was quoting an extrapolation as a
-measurement.
+### The two strategies became an accidental natural experiment
 
-The payoff for that cost is the number in README §5: **2.38 ms** for an exact full-scan
-query over all 14,660 vectors. Embedding is slow once; searching is fast forever, which is
+Building `fixed` and `heading` over the *same corpus* with the *same encoder* — differing
+only in how the text was cut up — separates the two candidate units cleanly:
+
+| Strategy | Chunks | Mean chars | Build | **chunks/s** | **tokens/s** |
+|---|---:|---:|---:|---:|---:|
+| `fixed` | 14,660 | 997 | ~41 min | **6.0** | **1,486** |
+| `heading` | 22,789 | 536 | ~37 min | **10.3** | **1,377** |
+
+Per-chunk throughput differs by **1.7×**. Per-token throughput differs by **8%**. Same
+hardware, same model, same corpus. That is about as direct a demonstration as this project
+will produce that the encoder's cost is set by tokens and the "texts per second" figure is
+an artefact of whatever text length you happened to benchmark on.
+
+It also retroactively explains the original error exactly: the toy benchmark used ~12-token
+strings and reported 160 texts/s ≈ 1,900 tokens/s — the token figure was roughly right all
+along. Only the unit was wrong.
+
+The payoff for the build cost is in README §5: a few milliseconds for an exact full-scan
+query over every vector. Embedding is slow once; searching is fast forever, which is
 precisely why an approximate index would be buying nothing at this scale.
+
+**Caveat on the latency figures.** The same `fixed` index measured 2.38 ms idle and 3.43 ms
+while the `heading_ctx` build was saturating five cores. Query latency here is memory-
+bandwidth bound, so it is sensitive to contention; the README figures are re-measured on an
+idle machine after all builds complete, and that condition is stated alongside them.
 
 Consequence: a full three-strategy rebuild is slow enough to make the chunking × arm grid
 painful to iterate on. Fixes for session 2, in order of value:

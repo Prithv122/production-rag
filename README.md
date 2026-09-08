@@ -123,19 +123,27 @@ budget bugs — see [NOTES.md](NOTES.md).
 | Build | 2.5 s |
 | **Mean query latency** | **0.37 ms** |
 
-### Dense index — measured (`fixed` strategy)
+### Dense index — measured
 
-| | |
-|---|---|
-| Vectors | 14,660 × 384 float32 (`BAAI/bge-small-en-v1.5`) |
-| Size on disk | 23 MB |
-| **Exact query latency** | **2.38 ms** — full scan, no approximation |
-| Build (CPU) | ~40 min · ~6 chunks/s · ~1.5k tokens/s |
+Encoder `BAAI/bge-small-en-v1.5`, 384 dimensions, float32, CPU.
 
-The 2.38 ms is the number behind the no-ANN decision in §4: an exhaustive scan of every
-vector in the corpus costs single-digit milliseconds, so an approximate index would trade
-correctness for a saving that does not exist yet. The build time is the real cost here,
-and it is a one-off — see §7 and [NOTES.md](NOTES.md) for the caching fix.
+| Strategy | Vectors | Size | Build | chunks/s | tokens/s | Exact query |
+|---|---:|---:|---:|---:|---:|---:|
+| `fixed` | 14,660 | 23 MB | ~41 min | 6.0 | 1,486 | **2.38 ms** |
+| `heading` | 22,789 | 35 MB | ~37 min | 10.3 | 1,377 | 4.78 ms |
+
+Query latency is an exhaustive scan of every vector — no approximation, no index
+structure. That is the number behind the no-ANN decision in §4: full-corpus exact search
+costs single-digit milliseconds, so an approximate index would trade recall for a saving
+that does not exist at this scale. Latency is memory-bandwidth bound and therefore
+sensitive to load; the `fixed` figure moved 2.38 → 3.43 ms while another build was
+saturating five cores, so these are idle-machine measurements.
+
+The two rows are also a natural experiment worth reading: same corpus, same encoder,
+chunking as the only difference. Per-*chunk* throughput differs by 1.7×; per-*token*
+throughput differs by 8%. Encoder cost is set by tokens, and "texts per second" is an
+artefact of the text length you benchmarked on. See [NOTES.md](NOTES.md) — this corrected
+an estimate of mine that was ~27× optimistic.
 
 ### Retrieval quality — _pending, session 2_
 
