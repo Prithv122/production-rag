@@ -39,6 +39,7 @@ DOCS_PATH = CORPUS_DIR / "normalised" / "docs.jsonl"
 INDEX_DIR = Path("indexes")
 EMBED_CACHE = Path(".cache/embeddings")
 RERANK_CACHE = Path(".cache/rerank")
+LLM_CACHE = Path(".cache/llm")
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +127,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 def cmd_search(args: argparse.Namespace) -> int:
     spec = ARMS[args.arm]
+    rewriter = _provider(args) if spec.needs_llm else None
     retriever = Retriever.load(
         args.indexes,
         args.strategy,
@@ -138,7 +140,7 @@ def cmd_search(args: argparse.Namespace) -> int:
         k=args.k,
         pool=args.pool,
         reranker=_reranker(args) if spec.rerank else None,
-        rewriter=build_provider(args.model_arm, offline=args.replay) if spec.needs_llm else None,
+        rewriter=rewriter,
     )
     if len(result.queries) > 1:
         print("queries: " + " | ".join(result.queries) + "\n")
@@ -189,6 +191,11 @@ def _embedder(args: argparse.Namespace):
     return CachedEmbedder(inner, cache) if cache else inner
 
 
+def _provider(args: argparse.Namespace):
+    """The generation stack for this run, with the cache the flags point at."""
+    return build_provider(args.model_arm, cache_dir=args.llm_cache, offline=args.replay)
+
+
 def _reranker(args: argparse.Namespace):
     from .rerank import CachedReranker, CrossEncoderReranker
 
@@ -220,7 +227,7 @@ def cmd_propose(args: argparse.Namespace) -> int:
     passages = sample_passages(chunks, n=args.passages, seed=args.seed)
 
     spec = MODEL_ARMS[args.model_arm]
-    provider = build_provider(args.model_arm, offline=args.replay)
+    provider = _provider(args)
     stats = ProposalStats(passages=len(passages))
     seen: set[str] = set()
     accepted = []
@@ -397,7 +404,7 @@ LLM_BUNDLE = Path("eval/cache/llm.jsonl")
 RERANK_BUNDLE = Path("eval/cache/rerank.jsonl")
 
 CACHES = {
-    "llm": (Path(".cache/llm"), LLM_BUNDLE),
+    "llm": (LLM_CACHE, LLM_BUNDLE),
     "rerank": (RERANK_CACHE, RERANK_BUNDLE),
 }
 
@@ -446,7 +453,7 @@ def cmd_eval(args: argparse.Namespace) -> int:
     needs_rerank = any(ARMS[a].rerank for a in arms)
     needs_llm = any(ARMS[a].needs_llm for a in arms)
 
-    rewriter = build_provider(args.model_arm, offline=args.replay) if needs_llm else None
+    rewriter = _provider(args) if needs_llm else None
     if rewriter is not None and not args.replay:
         _warm_rewrites(questions, rewriter, workers=args.workers)
 
@@ -627,6 +634,7 @@ def _add_component_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--embed-cache", type=Path, default=EMBED_CACHE)
     parser.add_argument("--rerank-model", default=DEFAULT_RERANK_MODEL)
     parser.add_argument("--rerank-cache", type=Path, default=RERANK_CACHE)
+    parser.add_argument("--llm-cache", type=Path, default=LLM_CACHE)
     parser.add_argument("--model-arm", choices=sorted(MODEL_ARMS), default="nemotron-super")
     parser.add_argument(
         "--replay",
