@@ -164,3 +164,93 @@ def test_built_chunk_files_respect_the_budget(strategy: str) -> None:
     if not path.exists():
         pytest.skip(f"run `production-rag index --strategy {strategy}` first")
     assert max(len(c.text) for c in load_chunks(INDEXES, strategy)) <= 1200 + 200 + 2
+
+
+# ---------------------------------------------------------------------------
+# The paths the fast suite fakes: real cross-encoder, real chunk-to-span mapping
+# ---------------------------------------------------------------------------
+#: Measured share of chunks whose token count exceeds bge-small's 512-token
+#: window and are therefore silently truncated by the encoder. Session 1 asserted
+#: this was zero from a chars-per-token estimate; it is not. The cause is
+#: markdown table rules -- a row of `| ---- | ---- |` tokenizes at **1.00
+#: characters per token** against a corpus average of 3.6, so a rule row can eat
+#: the entire window while carrying no meaning at all. Full diagnosis in NOTES.md.
+#:
+#: The bound is a regression guard, not an endorsement: it fails if the rate
+#: grows. The fix (collapse table rules during normalisation) is deferred because
+#: changing chunk text invalidates all three dense indexes *and* the cross-encoder
+#: cache, which is a re-run of the whole evaluation for a sub-1% effect.
+MAX_TRUNCATED_SHARE = {"fixed": 0.011, "heading": 0.004, "heading_ctx": 0.007}
+
+
+@pytest.mark.parametrize("strategy", sorted(MAX_TRUNCATED_SHARE))
+def test_silent_encoder_truncation_stays_within_its_measured_bound(strategy: str) -> None:
+    """Truncation is silent: a chunk over the window loses its tail with no error
+    and no visible symptom, so the only way to know is to count."""
+    if not (INDEXES / strategy / "chunks.jsonl").exists():
+        pytest.skip(f"run `production-rag index --strategy {strategy}` first")
+
+    from transformers import AutoTokenizer
+
+    from production_rag.chunking import USES_BREADCRUMB
+    from production_rag.dense import DEFAULT_MODEL
+
+    tokenizer = AutoTokenizer.from_pretrained(DEFAULT_MODEL)
+    chunks = load_chunks(INDEXES, strategy)
+    texts = [c.embed_text(with_breadcrumb=USES_BREADCRUMB[strategy]) for c in chunks]
+    counts = [len(ids) for ids in tokenizer(texts, add_special_tokens=True)["input_ids"]]
+
+    over = sum(1 for n in counts if n > tokenizer.model_max_length)
+    assert over / len(counts) <= MAX_TRUNCATED_SHARE[strategy]
+
+
+@_needs_index("heading", "dense")
+def test_the_reranker_reorders_a_real_pool() -> None:
+    from production_rag.pipeline import Retriever
+    from production_rag.rerank import CrossEncoderReranker
+
+    from production_rag.dense import SentenceTransformerEmbedder  # isort: skip
+
+    retriever = Retriever.load(
+        INDEXES, "heading", embedder=SentenceTransformerEmbedder(), with_dense=True
+    )
+    query = "how do I avoid rebuilding the whole table on every run"
+    before = retriever.retrieve(query, arm="hybrid", k=10, pool=50).chunk_ids
+    after = retriever.retrieve(
+        query, arm="hybrid_rerank", k=10, pool=50, reranker=CrossEncoderReranker()
+    ).chunk_ids
+
+    assert len(after) == 10
+    assert before != after, "a cross-encoder that changes nothing is not being applied"
+    # Reranking cannot invent candidates: everything it returns came from the pool.
+    pool = retriever.retrieve(query, arm="hybrid", k=50, pool=50).chunk_ids
+    assert set(after) <= set(pool)
+
+
+@_needs_index("heading")
+@_needs_index("fixed")
+@needs_corpus
+def test_one_evidence_span_maps_onto_every_strategy() -> None:
+    """The cross-strategy contract, on the real corpus rather than a fixture:
+    a hand-written label must resolve to at least one gold chunk under each
+    chunking strategy, or the strategies are being scored on different sets."""
+    from production_rag.groundtruth import (
+        HAND_WRITTEN_PATH,
+        gold_chunk_ids,
+        index_chunks_by_doc,
+        load_hand_written,
+    )
+
+    if not HAND_WRITTEN_PATH.exists():
+        pytest.skip("no hand-written question file")
+
+    documents = {d.doc_id: d for d in read_jsonl(DOCS)}
+    questions = [q for q in load_hand_written(HAND_WRITTEN_PATH, documents) if q.evidence]
+
+    for strategy in ("heading", "fixed"):
+        by_doc = index_chunks_by_doc(load_chunks(INDEXES, strategy))
+        for question in questions:
+            gold = gold_chunk_ids(question, by_doc)
+            assert len(gold) >= len(question.evidence), (
+                f"{strategy}: {question.text[:50]!r} lost evidence"
+            )
