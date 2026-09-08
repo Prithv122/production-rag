@@ -187,7 +187,8 @@ def test_overlap_is_charged_against_the_budget() -> None:
     """
     doc = make_doc("# H\n\n" + "word " * 2000)
     chunks = chunk_fixed(doc, max_chars=400, overlap_chars=150)
-    assert max(len(c.text) for c in chunks) <= 400 + 150
+    # The +2 is the blank-line separator joining the carried tail to the body.
+    assert max(len(c.text) for c in chunks) <= 400 + 150 + 2
 
 
 def test_a_single_unwrapped_paragraph_still_respects_the_budget() -> None:
