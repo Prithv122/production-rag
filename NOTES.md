@@ -440,7 +440,7 @@ placed in the environment never appears anywhere under the cache directory.
 
 ## An operational note on the cost of a free tier
 
-The primary model runs at a **median 65 s per call** (p90 126 s, max 162 s). That is fine
+The primary model runs at a **median 65 s per call** (p90 126 s, max 162 s) — a figure session 3 had to retract; see "The table that was one model wearing four hats" below. The right order of magnitude survives, and it is fine
 for a demo and structurally wrong for an evaluation loop: 184 questions × two rewrite modes
 × three strategies, done inline, is measured in hours of waiting on one connection.
 
@@ -544,3 +544,77 @@ level up — the models that need the most parsing help are exactly the ones tha
 honour `response_format`, so validation cannot replace the repair path, only sit on top of
 it. One dataclass and one already-tested parser beat a dependency that would duplicate half
 of both.
+
+## The table that was one model wearing four hats
+
+The answer eval's first run produced a four-row table in which all four rows were nearly
+identical: the same refusal rate to three decimals (0.185), the same uncited rate (~0.97),
+and the same 10 of 54 questions refused by all four models. Four models — a 120B, a 550B,
+a hosted Gemini and a 7B local quant — agreeing perfectly is not agreement. It is one model.
+
+`fell_back = 1.000` on all three hosted arms. Every OpenRouter call had failed and
+`FallbackProvider` had quietly answered with local Ollama. The table compared
+`qwen2.5:7b-instruct-q3_K_M` against itself, four times, over 65 minutes.
+
+Three separate faults, and the interesting part is that each one alone would have been
+survivable:
+
+1. **The account cannot reach the models.** `:free` models return **429
+   `free-models-per-day`** — OpenRouter caps a credit-less account at **50 requests/day**,
+   account-wide rather than per-model, so no free model is a workaround for another. Paid
+   models return **402**, the account never having purchased credits.
+2. **One arm never worked at all.** `nemotron-ultra` was configured as
+   `nvidia/nemotron-3-ultra-550b:free`. The real id is
+   `nvidia/nemotron-3-ultra-550b-a55b:free`. Every call was a 400 — including in session 2,
+   where the arm was described in `MODEL_ARMS` as "exercises the JSON-repair path" on the
+   basis of no executions whatsoever.
+3. **The fallback made all of that invisible.** Graceful degradation is a feature of `ask`
+   and an acceptable-criteria item for this project. Inside a comparison *between models* it
+   is a falsification: "arm X failed" silently becomes "arm X answered, as arm Y".
+
+The fixes are structural rather than a note in the README:
+
+- `answer-eval` builds its providers with `fallback=False`. A comparison that can substitute
+  one model for another is not a comparison.
+- `ArmSummary.fell_back` reports, per arm, the share of rows answered by a model other than
+  the one named. It is what caught this, an hour after being written for a different reason.
+- `production-rag cache audit` walks the committed replay bundles comparing the requested
+  model in each key against the answering model in each value, and **exits non-zero** on any
+  disagreement. Both fields were already on disk in session 2; nothing was reading them.
+
+**It also invalidated a published attribution, which is the part that stings.** Running the
+audit against session 2's bundle: of 337 committed rewrite calls, **279 (83%) were answered
+by local qwen2.5, not by the nemotron the results file names**. The retrieval comparison
+survives — every arm consumed the same committed rewrites and they replay byte-identically —
+but "the rewriter was nemotron-3-super" was wrong, and so was the pooled "median 65 s"
+latency, which averaged two models and described neither (34.8 s median for the 58 real
+nemotron calls, 53.9 s for the 279 local ones). Both are corrected in the README with the
+split rather than quietly restated.
+
+The lesson is narrower and more useful than "test your code". Every one of these faults was
+*already recorded* in an artefact I had committed to the repository. The cache stored the
+requested model and the answering model side by side, in git, for a session and a half. A
+resilience feature and an integrity check want opposite things from the same event, and the
+project had built only the resilience half.
+
+## A prompt whose example contradicted its own rule
+
+With the fallback fixed, the first honest measurement said 97.7% of answers carried no
+citation at all — from a model that was otherwise answering correctly out of the right
+passages. The rules said "cite with square-bracket markers". The output example directly
+below them said:
+
+    Return JSON: {"sufficient": true or false, "answer": "..."}
+
+An example is a stronger instruction than a rule. The model matched the shape it was shown,
+and the shape had no markers in it. Putting a marked-up answer in the example moved the
+uncited rate from 0.977 to 0.000 on a probe; the rule text barely changed.
+
+The repair then produced its own failure, which is worth recording because it is the same
+mistake in the opposite direction. The first fixed example used realistic content —
+`on_schema_change` set to `append_new_columns`. `llama3.2:3b` promptly lifted both
+identifiers verbatim into an answer about *Dagster asset dependencies*, where they are
+meaningless. A small model does not reliably distinguish an example from context; it treats
+anything concrete in the prompt as material. The example is now shouty placeholder text
+(`FIRST SENTENCE OF THE ANSWER [2].`), which demonstrates marker placement and offers
+nothing worth stealing.

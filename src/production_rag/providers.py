@@ -462,15 +462,19 @@ MODEL_ARMS: dict[str, dict[str, Any]] = {
     },
     "nemotron-ultra": {
         "provider": "openrouter",
-        "model": "nvidia/nemotron-3-ultra-550b:free",
+        "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
         "structured": False,
-        "note": "1M context but no structured output; exercises the JSON-repair path",
+        "note": "NEVER RUN. The id here was wrong until session 3 (missing the -a55b "
+        "suffix), so every call to this arm was a 400 that the fallback chain swallowed. "
+        "Corrected against the live model list; still unrun, because the free tier is "
+        "capped account-wide at 50 requests/day",
     },
     "gemini-flash-lite": {
         "provider": "openrouter",
         "model": "google/gemini-2.5-flash-lite",
         "structured": True,
-        "note": "paid reference arm, $0.10/$0.40 per M tokens",
+        "note": "NEVER RUN. Paid arm, $0.10/$0.40 per M tokens, and the account has no "
+        "credits -- every call is a 402",
     },
     "ollama-qwen": {
         "provider": "ollama",
@@ -478,7 +482,29 @@ MODEL_ARMS: dict[str, dict[str, Any]] = {
         "structured": True,
         "note": "offline fallback; no key, no egress",
     },
+    # The three arms below are what the published answer table actually ran on,
+    # and the reason is in the README: the hosted arms are unreachable on a free
+    # OpenRouter account (429 at 50 requests/day for the `:free` models, 402 for
+    # anything paid). Local models are not a consolation prize here -- they need
+    # no key, no quota and no trust in me, so the answer table is the *more*
+    # reproducible half of this project rather than the less.
+    "ollama-qwen-coder": {
+        "provider": "ollama",
+        "model": "qwen2.5-coder:7b-instruct-q3_K_M",
+        "structured": True,
+        "note": "same size and quantisation as ollama-qwen, code-tuned -- isolates tuning",
+    },
+    "ollama-llama-3b": {
+        "provider": "ollama",
+        "model": "llama3.2:3b",
+        "structured": True,
+        "note": "different family, less than half the parameters -- isolates scale",
+    },
 }
+
+#: Arms that run with no API key and no egress. The answer eval defaults to
+#: these, because an evaluation nobody else can re-run is not an evaluation.
+LOCAL_ARMS = ("ollama-qwen", "ollama-qwen-coder", "ollama-llama-3b")
 
 
 def build_provider(

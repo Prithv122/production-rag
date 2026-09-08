@@ -37,7 +37,7 @@ from .fuse import FUSIONS
 from .groundtruth import HAND_WRITTEN_PATH, QUESTIONS_PATH
 from .ingest import ingest_source, read_jsonl, write_jsonl
 from .pipeline import ARMS, Retriever, arms_for
-from .providers import MODEL_ARMS, build_provider
+from .providers import LOCAL_ARMS, MODEL_ARMS, build_provider
 from .rerank import DEFAULT_POOL
 from .sources import DUCKDB_VERSION_ARCHIVE, SOURCES
 
@@ -485,9 +485,16 @@ def cmd_answer_eval(args: argparse.Namespace) -> int:
 
     chunks = {c.chunk_id: c for c in load_chunks(args.indexes, args.strategy)}
     by_doc = index_chunks_by_doc(chunks.values())
+    # `fallback=False`, unlike everywhere else. Graceful degradation to a local
+    # model is a feature of `ask` and a liability here: it turns "arm X failed"
+    # into "arm X quietly answered as arm Y", and a comparison between models
+    # that can silently substitute one for another is not a comparison. It cost
+    # a 65-minute run to learn that -- every OpenRouter call in it fell through
+    # to Ollama, and the table showed four identical rows. Fail loudly instead;
+    # `fell_back` in the summary is the second line of defence.
     providers = {
-        arm: build_provider(arm, cache_dir=args.llm_cache, offline=args.replay)
-        for arm in (args.model_arm_list or list(MODEL_ARMS))
+        arm: build_provider(arm, cache_dir=args.llm_cache, offline=args.replay, fallback=False)
+        for arm in (args.model_arm_list or list(LOCAL_ARMS))
     }
 
     total = len(questions) * len(providers)
@@ -548,6 +555,34 @@ CACHES = {
 }
 
 
+def _audit_bundle(bundle: Path) -> int:
+    """Report cache entries answered by a different model than was requested.
+
+    This exists because the project shipped a table naming one model that had in
+    fact been produced mostly by another. `FallbackProvider` degrades to a local
+    model when the primary fails, which is the right behaviour for a demo and a
+    silent falsification of provenance in an evaluation. The cache records both
+    the requested model (in the key) and the answering model (in the value), so
+    the discrepancy was always on disk -- nothing was looking at it.
+    """
+    if not bundle.exists():
+        print(f"{bundle}: no bundle")
+        return 0
+    entries = [json.loads(line) for line in bundle.read_text(encoding="utf-8").splitlines() if line]
+    mismatched: dict[tuple[str, str], int] = {}
+    for entry in entries:
+        requested = entry.get("key", {}).get("model", "")
+        answered = entry.get("value", {}).get("model", "")
+        if requested and answered and requested != answered:
+            mismatched[(requested, answered)] = mismatched.get((requested, answered), 0) + 1
+
+    total = sum(mismatched.values())
+    print(f"{bundle}: {len(entries):,} entries, {total:,} answered by a different model")
+    for (requested, answered), count in sorted(mismatched.items(), key=lambda kv: -kv[1]):
+        print(f"    {count:5,}  requested {requested}  ->  answered by {answered}")
+    return total
+
+
 def cmd_cache(args: argparse.Namespace) -> int:
     """Export the committed caches, or expand them after a clone.
 
@@ -557,6 +592,9 @@ def cmd_cache(args: argparse.Namespace) -> int:
     produced the numbers -- which is not reproducible.
     """
     from .cache import JsonCache
+
+    if args.action == "audit":
+        return 0 if not sum(_audit_bundle(bundle) for _, bundle in CACHES.values()) else 1
 
     for name, (root, bundle) in CACHES.items():
         cache = JsonCache(root)
@@ -731,7 +769,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--model-arm-list",
         nargs="+",
         choices=sorted(MODEL_ARMS),
-        help="which generation arms to run (default: all of them)",
+        help="which generation arms to run. Defaults to the local ones, which need no "
+        "key and no quota; the hosted arms are selectable but see the README on what a "
+        "free OpenRouter account can actually reach",
     )
     _add_component_args(answer_eval)
     answer_eval.set_defaults(func=cmd_answer_eval)
@@ -827,7 +867,12 @@ def build_parser() -> argparse.ArgumentParser:
     band.set_defaults(func=cmd_band)
 
     cache = subparsers.add_parser("cache", help="bundle or restore the replay caches")
-    cache.add_argument("action", choices=["export", "import"])
+    cache.add_argument(
+        "action",
+        choices=["export", "import", "audit"],
+        help="audit reports entries whose answering model differs from the requested one "
+        "-- the silent-fallback check; exits non-zero if any are found",
+    )
     cache.set_defaults(func=cmd_cache)
 
     return parser
