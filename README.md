@@ -8,11 +8,13 @@
 **Prebuilt index:** [`Prithv122/production-rag-index`](https://huggingface.co/datasets/Prithv122/production-rag-index) · **Demo:** [`space/`](space/), runnable locally — see §6
 **Stack:** Python 3.12 · scipy sparse (own BM25) · sentence-transformers · OpenRouter + Ollama · Gradio
 
-> **The demo is not hosted.** The Gradio app is written, the index it needs is published, and
-> the deploy is one command — but Hugging Face now returns `402 Payment Required` for a
-> Gradio Space on free `cpu-basic`; only static Spaces are free. Rather than rewrite the
-> demo as a client-side static page and quietly stop running the code these numbers came
-> from, it is left as a local app with the hosting blocker stated. See §6.
+> **The demo is containerised and verified, but not yet hosted.** Hugging Face now returns
+> `402 Payment Required` for a Gradio Space on free `cpu-basic` (only static Spaces are free),
+> and rewriting the demo as a client-side static page would stop it running the code these
+> numbers came from — so it was not. Instead there is a [Dockerfile](space/Dockerfile) and a
+> [Cloud Run runbook](space/DEPLOY.md); the image has been **built and verified end-to-end
+> locally** (retrieval, citations, refusal, with and without a generation key: 62 s cold
+> start, 2.78 GB). The remaining step needs a billing-enabled GCP project. See §6.
 
 ---
 
@@ -645,20 +647,39 @@ uv run --extra embed --with gradio --with huggingface-hub python space/app.py
 Retrieval in the demo needs no secret; generation is disabled with a visible banner if
 `OPENROUTER_API_KEY` is not set.
 
-**On hosting it.** The index is published and the Space files are complete, so deploying is:
+**On hosting it.** Two routes, one blocked and one prepared.
 
-```bash
-hf repos create <user>/production-rag --type space --space-sdk gradio --public
-hf upload <user>/production-rag space . --repo-type space
-```
+*Hugging Face Spaces* is blocked. The index is published and the Space files are complete, so
+deploying would be `hf repos create ... --space-sdk gradio` then `hf upload`. That returns
+**402**: HF restricts Gradio and Docker Spaces on free `cpu-basic` to PRO accounts, and only
+static Spaces are free. The available free workaround is a client-side static rewrite — BM25
+in JavaScript, the encoder via transformers.js — which would mean the hosted demo no longer
+runs the code these numbers were measured on. That is the one property `space/app.py` exists
+to preserve, so it was not done.
 
-That currently fails with `402 Payment Required`: Hugging Face restricts Gradio and Docker
-Spaces on free `cpu-basic` to PRO accounts, and only static Spaces are free. The available
-workaround is to rewrite the demo as a client-side static page — BM25 in JavaScript, the
-encoder via transformers.js — which would mean the hosted demo no longer runs the code these
-numbers were measured on, and that is the one property the whole `space/app.py` design
-exists to preserve. So the app stays a local one and the blocker is stated here rather than
-papered over with a different demo.
+*Google Cloud Run* is prepared and verified. [`space/Dockerfile`](space/Dockerfile) builds an
+image that runs the same package and the same app; [`space/DEPLOY.md`](space/DEPLOY.md) is the
+runbook, with the configuration reasoned flag by flag and the cost caveat stated up front
+(Cloud Run's free allowance is non-expiring but subject to change, and **requires billing to
+be enabled** — overage is real money, so set a budget alert and keep `--min-instances 0`).
+
+The container is verified locally, not merely written:
+
+| Check | Result |
+|---|---|
+| Serves the Gradio UI on `$PORT` | ✅ |
+| Retrieval — "read a parquet file in duckdb" | ✅ ranks DuckDB Parquet pages 1–8 |
+| Citations resolve to listed sources | ✅ `[2]` → the dbt *On schema change* page |
+| Refusal on the unanswerable example | ✅ "Refused (model)", no citations |
+| Generation **disabled** without a key | ✅ banner shown, retrieval unaffected |
+| Generation **enabled** (`MODEL_ARM=ollama-qwen`) | ✅ answered in 38.5 s |
+| Cold start / warm response | ✅ **62 s** / 0.008 s |
+| Image size, CPU-only torch confirmed | ✅ 2.78 GB, `torch 2.14.0+cpu`, no `nvidia-*` |
+
+The OpenRouter generation path inside the container is **not** verified, because the free-tier
+daily cap was exhausted (§5); it is bound as a Cloud Run secret at deploy time and the key is
+deliberately absent from the image and this repository. What remains is `gcloud` and a
+billing-enabled project.
 
 ### Reproducing the evaluation
 
