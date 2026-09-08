@@ -1,0 +1,6 @@
+# The Space runs the library, it does not reimplement it -- the demo and the
+# evaluation are the same code path, so a number in the README and a result in
+# the UI cannot drift apart.
+production-rag[embed] @ git+https://github.com/Prithv122/production-rag@main
+gradio>=5.0
+huggingface-hub>=0.25

@@ -451,3 +451,96 @@ timing, and interleaved retrieval would poison the per-arm latency that is itsel
 number. And the rewrite cache is **warmed before the grid runs**, so the latency the grid
 reports for the rewrite stage is a cache-read latency and is labelled as such — the real
 per-call latency lives in the cached responses.
+
+## What a verification pass is actually for
+
+The plan said: verify the question set, re-cut the tables on the verified subset, publish
+those. What happened was a **0/60 correction rate** and a uniform 5–9 point *drop* in every
+metric, which is the shape of result that quietly invites a bad decision — publish the
+lower numbers as "the verified ones" and let a reader infer that verification corrected
+something.
+
+It corrected nothing. With zero edits and zero rejections the verified questions are the
+same questions, with the same labels, scored by the same code; the only thing that changed
+was *which 60 of the 184* the mean was taken over. Two consequences got built rather than
+mentioned:
+
+**A sampling band, because the numbers needed an error bar before they needed a re-cut.**
+`production-rag band` resamples n questions without replacement from a saved results file.
+For n = 60 the 95% interval on recall@5 is roughly ±0.10 — wider than the gap between most
+of the arms in the tables. That is uncomfortable and it is the honest frame: the *ordering*
+of the arms is what survives resampling, and the differences in the third decimal are
+noise being read as signal. The bootstrap is without replacement because the question is
+"what if I had verified a different 60 of these", not the textbook "what if the population
+resembled my sample".
+
+**A shuffle in `verify`, because a prefix is not a sample.** The first 60 were the first 60
+in file order, and they scored at or below the lower edge of that band on three of four
+metric/arm combinations. That is unlucky rather than sinister, but it is unlucky in a way
+that a random 60 could not have been systematically, and it made "verified numbers are
+lower" ambiguous between two explanations. `verify` now walks the pending set in
+seeded-shuffled order, so any partial verification is an unbiased sample of the whole set.
+The bias already baked into the first 60 cannot be undone and is disclosed instead.
+
+The uncomfortable part stays in the README: 0/60 does not distinguish "the set is clean"
+from "the reviewer accepted too readily", the accept key is the cheapest one in the loop,
+and 124 questions are still unreviewed.
+
+## Scoring answers without appointing an LLM judge
+
+The obvious way to score generated answers is to ask a bigger model whether they are good.
+It was rejected, on the project's own terms rather than on taste: every number here is
+supposed to be re-derivable offline by someone who does not trust me, and an LLM judge
+makes the headline figure depend on a model that cannot be pinned, cannot be cached
+honestly across versions, and cannot be re-run by a reader. Replacing "is the answer
+correct?" with "does a model I chose say it is?" is not a measurement, it is a deferral.
+
+So the answer eval measures only things that either happened or did not:
+
+- **Citation validity.** The model is handed N numbered passages; a `[n]` outside `1..N` is
+  a fabricated source and is caught by arithmetic. Invalid citations are kept on the answer
+  object as the measurement and scrubbed only from the display copy — deleting them from
+  the object would delete the evidence.
+- **Uncited answers**, counted separately from invalid citations, because the fix differs: a
+  dangling marker is a prompting problem, a paragraph with no marker at all is the model
+  ignoring the contract. (The very first end-to-end run produced exactly this: the local
+  qwen answered a `read_parquet` question fluently, correctly, and with zero citations.)
+- **Grounding**, meaning the answer cited at least one chunk containing a gold evidence
+  span. That is *not* "the answer is correct" — a model can cite the right passage and
+  summarise it wrongly — and the README states it as the weaker claim it is.
+- **Refusal recall paired with false refusal.** Never one without the other: a system that
+  refuses everything scores 1.000 on the first.
+
+Retrieval is frozen for the comparison — the rankings are replayed out of
+`eval/results/retrieval.json` rather than re-retrieved per provider — so every arm sees
+byte-identical context and a difference between two rows cannot be a retrieval difference.
+It also means the answer eval needs no encoder, no index and no torch.
+
+## The refusal gate that does not work, kept anyway
+
+The appealing design is to refuse before paying for a generation: low top score means
+nothing relevant was found, so say so for free. It is implemented (`--min-top-score`) and it
+ships **off**, because the data says it would fire at random.
+
+The fusion score is min-max normalised per query — that is what makes two rankings addable
+— and normalisation is precisely the step that discards the absolute magnitude such a gate
+needs. On the session-2 grid the six unanswerable questions have a *higher* median fused top
+score (2.80) than the 121 conceptual ones (2.76). The raw pre-fusion scores do retain
+something (BM25 AUC 0.81 and dense 0.84 separating answerable from unanswerable), but with
+n = 6 unanswerable that is an observation, not a threshold anyone should ship behind.
+
+Keeping the flag rather than deleting the code is deliberate: on a corpus where the gate
+does work, it is one argument away, and the README carries the measurement that says it
+does not work *here* rather than silently omitting an idea a reviewer would ask about.
+
+## Deviation from the plan: no Pydantic
+
+`CLAUDE.md` lists "Pydantic answer contract" in the stack. The answer contract is a plain
+dataclass plus the existing `extract_json` repair path instead, and the dependency was not
+added. The reason is consistency with a decision already made and argued for the provider
+layer: this project talks to models over stdlib `urllib` because a client library covers one
+of the two providers and the second still needs hand-written code. The same logic applies a
+level up — the models that need the most parsing help are exactly the ones that do not
+honour `response_format`, so validation cannot replace the repair path, only sit on top of
+it. One dataclass and one already-tested parser beat a dependency that would duplicate half
+of both.
