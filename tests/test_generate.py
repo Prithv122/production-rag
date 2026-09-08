@@ -236,3 +236,49 @@ def test_format_lists_only_the_cited_sources(chunks, ranked):
 def test_default_context_budget_is_not_accidentally_tiny():
     assert DEFAULT_CONTEXT_CHARS > MAX_PASSAGE_CHARS
     assert isinstance(Answer("q", "t", False).context_ids, list)
+
+
+# ---------------------------------------------------------------------------
+# markdown rendering (used by the demo, tested here so the demo has no logic)
+# ---------------------------------------------------------------------------
+def test_link_citations_points_each_marker_at_its_passage(chunks, ranked):
+    from production_rag.generate import link_citations
+
+    provider = FakeProvider([payload("first [1] and second [2].")])
+    answer = generate("q", ranked, chunks, provider)
+    rendered = link_citations(answer)
+    assert f"[[1]](https://example.test/{ranked[0]})" in rendered
+    assert f"[[2]](https://example.test/{ranked[1]})" in rendered
+
+
+def test_link_citations_drops_a_fabricated_marker_and_tidies_the_gap(chunks, ranked):
+    from production_rag.generate import link_citations
+
+    provider = FakeProvider([payload("a claim [11].")])
+    answer = generate("q", ranked, chunks, provider)
+    assert link_citations(answer) == "a claim."
+
+
+def test_link_citations_expands_a_grouped_marker(chunks, ranked):
+    from production_rag.generate import link_citations
+
+    provider = FakeProvider([payload("both [1, 2] agree.")])
+    rendered = link_citations(generate("q", ranked, chunks, provider))
+    assert rendered.count("]](") == 2
+
+
+def test_markdown_sources_lists_the_cited_and_flags_the_fabricated(chunks, ranked):
+    from production_rag.generate import markdown_sources
+
+    provider = FakeProvider([payload("real [3], invented [42].")])
+    rendered = markdown_sources(generate("q", ranked, chunks, provider))
+    assert ranked[2] in rendered
+    assert ranked[0] not in rendered
+    assert "dropped 1 citation" in rendered
+
+
+def test_markdown_sources_is_empty_for_an_uncited_answer(chunks, ranked):
+    from production_rag.generate import markdown_sources
+
+    provider = FakeProvider([payload("no markers at all.")])
+    assert markdown_sources(generate("q", ranked, chunks, provider)) == ""

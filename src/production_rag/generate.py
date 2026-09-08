@@ -455,3 +455,37 @@ def format_answer(answer: Answer, *, width: int = 78) -> str:
     lines.append("")
     lines.append(tail)
     return "\n".join(lines)
+
+
+def link_citations(answer: Answer) -> str:
+    """The answer as markdown, with every valid ``[n]`` linked to its passage.
+
+    Lives here rather than in the demo so that the one piece of real logic in
+    `space/app.py` is covered by the test suite. A demo with untested logic in
+    it is a second implementation of the system, which is precisely what
+    importing the package was supposed to avoid.
+    """
+    by_number = {p.number: p for p in answer.passages}
+
+    def repl(match: re.Match[str]) -> str:
+        numbers = _split_marker(match.group(1))
+        rendered = [
+            f"[[{number}]]({by_number[number].url})" for number in numbers if number in by_number
+        ]
+        return "".join(rendered)
+
+    return re.sub(r"\s+([.,;:])", r"\1", _MARKER.sub(repl, answer.text)).strip()
+
+
+def markdown_sources(answer: Answer) -> str:
+    """Bullet list of the sources an answer actually cited."""
+    cited = set(answer.cited_chunk_ids)
+    lines = [
+        f"- **[{p.number}]** [{p.breadcrumb}]({p.url})"
+        for p in answer.passages
+        if p.chunk_id in cited
+    ]
+    if answer.invalid_citations:
+        markers = sorted({c.marker for c in answer.invalid_citations})
+        lines.append(f"- _dropped {len(markers)} citation(s) to passages never shown: {markers}_")
+    return "\n".join(lines)

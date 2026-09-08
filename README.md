@@ -5,16 +5,14 @@
 
 [![CI](https://github.com/Prithv122/production-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/Prithv122/production-rag/actions/workflows/ci.yml)
 
-**Live demo:** _pending — Hugging Face Space, session 3_
+**Prebuilt index:** [`Prithv122/production-rag-index`](https://huggingface.co/datasets/Prithv122/production-rag-index) · **Demo:** [`space/`](space/), runnable locally — see §6
 **Stack:** Python 3.12 · scipy sparse (own BM25) · sentence-transformers · OpenRouter + Ollama · Gradio
 
-> **Status: session 2 of 3 complete.** Retrieval is built, evaluated and reported: seven
-> arms across three chunking strategies against a 184-question span-labelled evaluation set,
-> plus a cross-encoder reranker, query rewriting as a measured arm, and a provider
-> abstraction with a fallback chain. **The question set has not yet been human-verified** —
-> that pass and answer generation are session 3, and the tables will be re-cut on the
-> verified subset. Sections marked _pending_ are honestly empty rather than filled with
-> placeholders.
+> **The demo is not hosted.** The Gradio app is written, the index it needs is published, and
+> the deploy is one command — but Hugging Face now returns `402 Payment Required` for a
+> Gradio Space on free `cpu-basic`; only static Spaces are free. Rather than rewrite the
+> demo as a client-side static page and quietly stop running the code these numbers came
+> from, it is left as a local app with the hosting blocker stated. See §6.
 
 ---
 
@@ -73,19 +71,28 @@ flowchart TB
     H --> J["fusion<br/>RRF or score"]
     I --> J
     J --> K["reranker<br/>cross-encoder"]
-    K --> L{"evidence<br/>strong enough?"}
-    L -->|no| M["refuse"]
-    L -->|yes| N["LLMProvider"]
+    K --> L["top-k as numbered<br/>passages 1..N"]
+    L --> N["LLMProvider"]
 
     N --> O["OpenRouter"]
     N --> P["Ollama fallback"]
-    O & P --> Q["answer + citations<br/>Pydantic-validated"]
+    O & P --> S{"sufficient?"}
+    S -->|no| M["refuse"]
+    S -->|yes| Q["answer with [n] markers"]
+    Q --> T{"does each [n]<br/>resolve to 1..N?"}
+    T -->|no| U["record as fabricated,<br/>strip from display"]
+    T -->|yes| V["cited answer"]
 
-    R[["eval harness<br/>recall@k · nDCG · MRR<br/>faithfulness · citation accuracy<br/>refusal accuracy · latency"]]
+    R[["eval harness<br/>recall@k · nDCG · MRR<br/>citation validity · grounding<br/>refusal recall vs false refusal"]]
     J -.measures.-> R
     K -.measures.-> R
-    Q -.measures.-> R
+    V -.measures.-> R
+    M -.measures.-> R
 ```
+
+The pre-generation refusal gate that would sit between `K` and `L` — refuse cheaply when the
+top score is low — is implemented and **shipped off**, because it was measured and it does
+not work on this corpus. See §5.
 
 ## 4. Key decisions & tradeoffs
 
@@ -107,6 +114,12 @@ flowchart TB
 | **Rewrite arms** | `expand` (original + variants) **and** `replace` | One rewrite arm | `expand` keeps the literal query in the fusion so a paraphrase can add a passage but not remove one; `replace` cannot. Running both is what turns a prediction into a measurement |
 | **LLM client** | stdlib `urllib` against the OpenAI-compatible endpoint | The `openai` package | Ollama's native endpoint is a different shape, so a client library covers one of two providers and the second is hand-written anyway — for a dependency tree on the offline retrieval path |
 | **Replay caches** | Exported to one JSONL each and committed | Gitignored, or a sharded directory in git | "Reproducible with the author's local cache" is not reproducible. The caches are small; the embedding cache (24k float32 vectors) is not, and stays out |
+| **Answer scoring** | Arithmetic over citations, refusals and existing gold spans | An LLM judge | A judge makes the headline number depend on a model a reader cannot pin, cache or re-run. "Did the cited passage contain the gold span" is weaker than "is the answer correct" and is reported as the weaker claim |
+| **Citations** | `[n]` markers inline in the prose | A separate `sources` list | A separate list says "these support this answer" without saying which sentence each one supports. Markers keep the association a reader needs and still parse with one regex |
+| **Invalid citations** | Kept on the answer object, stripped only from the display | Dropped at parse time | They are the measurement. Deleting them from the object deletes the evidence that the model fabricated a source |
+| **Unparseable responses** | Become a refusal | Shown as the answer | Putting unvalidated, uncited prose in the same UI slot as a checked answer is exactly the failure the citation machinery exists to prevent |
+| **Answer contract** | A dataclass plus the existing JSON repair path | Pydantic | The models needing the most parsing help are the ones that ignore `response_format`, so validation sits *on top of* repair rather than replacing it. A deviation from the plan; reasoned in NOTES.md |
+| **Demo deployment** | Space imports the package; index pulled from a dataset repo | Reimplementing retrieval in `app.py`; rebuilding the index on boot | A demo that reimplements the pipeline can silently be better or worse than the published numbers. Downloading the artefacts means the demo searches the *same* index the numbers came from, and startup is a **measured 256 s cold / 43 s warm** rather than a full re-encode of 22,789 chunks |
 
 ## 5. Results
 
@@ -483,6 +496,52 @@ uv run production-rag index --no-dense --strategy heading
 uv run production-rag search "on_schema_change" --arm bm25
 ```
 
+### Asking it something
+
+`search` returns a ranking. `ask` goes one step further and generates an answer with
+inline citations, or refuses:
+
+```bash
+uv run production-rag ask "what does on_schema_change do in an incremental model?"
+uv run production-rag ask "how do I configure the flux capacitor in dbt?"   # should refuse
+```
+
+This is the only part of the project that needs a key — `OPENROUTER_API_KEY`, or
+`--model-arm ollama-qwen` for a fully local run. Every `[n]` in the answer is resolved
+against the passages the model was actually shown; markers that point at nothing are
+reported and stripped from the display rather than rendered as if they were sources.
+
+### The demo
+
+[`space/`](space/) holds a Gradio app that imports this package rather than reimplementing
+retrieval, so the demo and the evaluation are the same code path. It pulls the prebuilt
+`heading` index from
+[`Prithv122/production-rag-index`](https://huggingface.co/datasets/Prithv122/production-rag-index)
+instead of rebuilding it, so it searches exactly the index these numbers came from. Run it
+locally with:
+
+```bash
+uv run --extra embed --with gradio --with huggingface-hub python space/app.py
+```
+
+Retrieval in the demo needs no secret; generation is disabled with a visible banner if
+`OPENROUTER_API_KEY` is not set.
+
+**On hosting it.** The index is published and the Space files are complete, so deploying is:
+
+```bash
+hf repos create <user>/production-rag --type space --space-sdk gradio --public
+hf upload <user>/production-rag space . --repo-type space
+```
+
+That currently fails with `402 Payment Required`: Hugging Face restricts Gradio and Docker
+Spaces on free `cpu-basic` to PRO accounts, and only static Spaces are free. The available
+workaround is to rewrite the demo as a client-side static page — BM25 in JavaScript, the
+encoder via transformers.js — which would mean the hosted demo no longer runs the code these
+numbers were measured on, and that is the one property the whole `space/app.py` design
+exists to preserve. So the app stays a local one and the blocker is stated here rather than
+papered over with a different demo.
+
 ### Reproducing the evaluation
 
 Every published retrieval number replays with no API key and no network, because the LLM
@@ -500,8 +559,10 @@ and takes a couple of hours on the free tier — is:
 
 ```bash
 uv run production-rag propose --passages 120     # LLM question candidates
-uv run production-rag verify --limit 60          # the human pass
-uv run production-rag eval                       # the grid
+uv run production-rag verify --limit 60          # the human pass (shuffled)
+uv run production-rag eval                       # the retrieval grid
+uv run production-rag answer-eval --subset 60    # the generation grid
+uv run production-rag band -n 60                 # the sampling band on the above
 uv run production-rag cache export               # re-bundle for replay
 ```
 
