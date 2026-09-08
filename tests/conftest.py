@@ -80,3 +80,71 @@ def sample_chunks() -> list[Chunk]:
         make_chunk("duckdb/parquet#0", "duckdb read_parquet reads parquet files", tool="duckdb"),
         make_chunk("dbt/tests#0", "dbt generic tests assert not null and unique"),
     ]
+
+
+class FakeReranker:
+    """Scores by token overlap, so reordering is predictable without torch.
+
+    The point of a fake here is not to imitate a cross-encoder's judgement --
+    nothing dependency-free can -- but to let every arm's *wiring* be tested:
+    that the reranker sees the pool and not the top-k, that its scores replace
+    the first stage's rather than being added to them, and that ties keep the
+    incoming order.
+    """
+
+    def __init__(self, name: str = "fake-cross-encoder") -> None:
+        self._name = name
+        self.calls: list[tuple[str, int]] = []
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def score(self, query: str, passages) -> np.ndarray:
+        passages = list(passages)
+        self.calls.append((query, len(passages)))
+        wanted = set(tokenize(query))
+        return np.asarray(
+            [len(wanted & set(tokenize(passage))) / (len(wanted) or 1) for passage in passages],
+            dtype=np.float32,
+        )
+
+
+class FakeProvider:
+    """Returns scripted text. Optionally fails, to exercise the fallback path."""
+
+    def __init__(
+        self,
+        responses: list[str] | None = None,
+        *,
+        name: str = "fake",
+        model: str = "fake-model",
+        fail: bool = False,
+    ) -> None:
+        self._responses = list(responses or [])
+        self._name = name
+        self._model = model
+        self.fail = fail
+        self.prompts: list[str] = []
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    def complete(self, prompt: str, **kwargs):
+        from production_rag.providers import LLMResponse, ProviderError
+
+        self.prompts.append(prompt)
+        if self.fail:
+            raise ProviderError(f"{self._name} is down")
+        text = self._responses.pop(0) if self._responses else "{}"
+        return LLMResponse(text=text, model=self._model, provider=self._name)
+
+
+@pytest.fixture
+def reranker() -> FakeReranker:
+    return FakeReranker()
