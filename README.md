@@ -666,10 +666,22 @@ Every published retrieval number replays with no API key and no network, because
 and cross-encoder responses ship with the repository:
 
 ```bash
-uv run production-rag cache import
-uv run production-rag eval --replay --verified-only     # retrieval
-uv run production-rag answer-eval --subset 60 --replay  # generation
-uv run production-rag cache audit                       # provenance of the bundles
+uv run production-rag ingest                              # corpus, at the pinned SHAs
+uv run production-rag index --no-dense --strategy heading # chunk text; no torch needed
+uv run production-rag cache import                        # expand the committed bundles
+uv run production-rag answer-eval --subset 60 --replay    # generation
+uv run production-rag cache audit                         # provenance of the bundles
+```
+
+The first two steps are the only prerequisites and they are not optional: chunk *text* is
+gitignored (20 MB, rebuildable), and the scorer needs it to reconstruct what each model was
+shown. `--no-dense` is enough here — the rankings are replayed from the committed results
+file, so no encoder and no torch are involved. Add the dense index for the retrieval replay:
+
+```bash
+uv sync --extra embed
+uv run production-rag index --strategy heading
+uv run production-rag eval --replay --verified-only        # retrieval
 ```
 
 **Verified, not asserted.** The answer table above was reproduced from a *fresh* cache built
