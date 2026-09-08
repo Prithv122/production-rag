@@ -1,0 +1,47 @@
+[project]
+name = "production-rag"
+version = "0.1.0"
+description = "Hybrid BM25 + dense retrieval over DuckDB, dbt and Dagster documentation with cross-encoder reranking and cited answers - where retrieval quality is measured, not asserted."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy>=2.5.3",
+    "scipy>=1.18.1",
+]
+
+# Most projects here ship a CLI. Entry points REQUIRE a real build backend —
+# a uv virtual project ([tool.uv] package = false) installs nothing, so the
+# documented command fails with "No module named ..." even while tests pass
+# (pytest's pythonpath hides it). Bit us on A1, nearly again on A3.
+# No-CLI projects (static sites, notebooks-only): delete [project.scripts];
+# the build backend is harmless to keep.
+[project.scripts]
+production-rag = "production_rag.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# ⚠️ When /new-project renames src/app, update BOTH the line below AND the
+# [project.scripts] target above.
+[tool.hatch.build.targets.wheel]
+packages = ["src/production_rag"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "ruff>=0.9",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

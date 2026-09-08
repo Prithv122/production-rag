@@ -1,0 +1,56 @@
+# Environments & secrets
+.env
+.env.local
+*.pem
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Data — commit only small samples, never full datasets
+data/raw/
+data/interim/
+data/processed/
+*.parquet
+*.duckdb
+*.db
+*.sqlite3
+!data/sample/**
+
+# Models & artifacts
+/models/
+*.pt
+*.pth
+*.onnx
+*.pkl
+mlruns/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# RAG corpus & indexes — rebuilt from pinned SHAs by `production-rag ingest`
+corpus/repos/
+corpus/normalised/
+indexes/
+*.npy
+*.npz
+
+# Generation cache holds prompt hashes + responses; results/ is committed on purpose
+.cache/models/
