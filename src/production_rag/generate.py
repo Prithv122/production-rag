@@ -85,28 +85,50 @@ ANSWER_SYSTEM = (
     "documentation passages you are given. You return JSON only."
 )
 
-# Two instructions here are load-bearing and were added after watching the
-# failure they prevent. "Do not use knowledge from outside the passages" alone
-# is not enough -- a model that half-remembers the right answer will write it
-# and attach the nearest-looking citation, which is worse than a refusal because
-# it is unfalsifiable to a reader. Naming refusal as a *correct* outcome, and
-# giving it a fixed sentence, makes not-answering an available move rather than
-# a failure the model is trying to avoid.
+# Three things here are load-bearing, and the third was learned the expensive
+# way.
+#
+# "Do not use knowledge from outside the passages" alone is not enough -- a
+# model that half-remembers the right answer will write it and attach the
+# nearest-looking citation, which is worse than a refusal because it is
+# unfalsifiable to a reader. And naming refusal as a *correct* outcome, with a
+# fixed sentence, makes not-answering an available move rather than a failure
+# the model is trying to avoid.
+#
+# The third: **the output example must itself be cited, and must contain no
+# content worth stealing.** The first version of this prompt asked for `[n]`
+# markers in rule 1 and then showed `{"answer": "..."}` as the shape to return.
+# Across 60 questions the model wrote a marker **twice**, produced good answers
+# from the right passages, and cited none of them -- because an example is a
+# stronger instruction than a rule, and the example contained no markers.
+#
+# The first repair used a realistic example (`on_schema_change` set to
+# `append_new_columns`) and immediately produced the opposite failure:
+# llama3.2:3b lifted those identifiers verbatim into an answer about *Dagster
+# asset dependencies*, where they do not belong. A small model treats a concrete
+# example as retrieved context. So the example is now shouty placeholder text --
+# it demonstrates marker placement and carries nothing a model could plausibly
+# copy as fact.
 ANSWER_TEMPLATE = """\
 Answer the question using ONLY the numbered passages below.
 
 Rules:
-- Cite with square-bracket markers that refer to the passage numbers, like [1] or [2][3].
-  Put the marker immediately after the sentence it supports.
+- EVERY sentence that states a fact must end with a square-bracket marker naming the
+  passage it came from, like [1] or [2][3]. An answer with no markers is wrong even if
+  the facts in it are right.
 - Never cite a number that is not in the list of passages below.
 - Do not use any knowledge that is not in the passages, even if you are confident it is
   correct. If the passages do not contain the answer, that is a correct outcome, not a
   failure: set "sufficient" to false and make "answer" exactly this sentence:
   {refusal}
 - Keep identifiers, config keys, flags and code exactly as they appear in the passages.
-- Be brief: at most {sentences} sentences.
+- Be brief: at most {sentences} sentences, each one cited.
 
-Return JSON: {{"sufficient": true or false, "answer": "..."}}
+Return JSON in exactly this shape, including the markers:
+{{"sufficient": true, "answer": "FIRST SENTENCE OF THE ANSWER [2]. SECOND SENTENCE [2][5]."}}
+
+or, when the passages do not answer the question:
+{{"sufficient": false, "answer": "{refusal}"}}
 
 PASSAGES
 {context}

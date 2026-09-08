@@ -409,7 +409,25 @@ done that and need the last half-point.
 
 (The rewrite arms' wall clock is lower than `hybrid_rerank`'s only because they ran second
 and reused its cached cross-encoder scores. Rewrite latency here is a cache read; the real
-per-call figure is a **median 65 s** on the free tier, and it is in the cached responses.)
+per-call figures are below.)
+
+> **Correction — who actually wrote these rewrites.** Session 2 reported the rewriter as
+> `nvidia/nemotron-3-super-120b-a12b:free`. Auditing the committed replay bundle in session 3
+> (`production-rag cache audit`) shows that is true of **58 of 337 calls**; the other **279
+> (83%) were answered by the local `qwen2.5:7b-instruct-q3_K_M`** after the provider fallback
+> chain silently absorbed OpenRouter failures. The retrieval *comparison* is unaffected —
+> every arm consumed the same committed rewrites, and they replay byte-identically — but the
+> attribution was wrong, so the corrected per-model figures are:
+>
+> | Rewriter | calls | median | p90 |
+> |---|---:|---:|---:|
+> | `nemotron-3-super:free` | 58 | 34.8 s | 77.4 s |
+> | `qwen2.5:7b-instruct-q3_K_M` (local) | 279 | 53.9 s | 205.1 s |
+>
+> The earlier "median 65 s on the free tier" pooled the two and belonged to neither. The
+> cause and the two fixes — `answer-eval` no longer allows a fallback, and `cache audit`
+> fails the build when a bundle's answering model disagrees with the requested one — are in
+> [NOTES.md](NOTES.md).
 
 #### The pre-registered prediction was half right, and the half that was wrong is more useful
 

@@ -164,3 +164,44 @@ def test_answer_eval_runs_every_provider_arm_unless_told_otherwise() -> None:
 def test_answer_eval_rejects_an_unknown_provider_arm() -> None:
     with pytest.raises(SystemExit):
         build_parser().parse_args(["answer-eval", "--model-arm-list", "gpt-9"])
+
+
+def test_cache_audit_flags_a_bundle_answered_by_a_different_model(tmp_path: Path) -> None:
+    from production_rag.cli import _audit_bundle
+
+    bundle = tmp_path / "llm.jsonl"
+    bundle.write_text(
+        "\n".join(
+            json.dumps(e)
+            for e in [
+                {"key": {"model": "big/model"}, "value": {"model": "big/model"}},
+                {"key": {"model": "big/model"}, "value": {"model": "little/local"}},
+                {"key": {"model": "big/model"}, "value": {"model": "little/local"}},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert _audit_bundle(bundle) == 2
+
+
+def test_cache_audit_is_clean_when_every_answer_came_from_the_model_asked(tmp_path: Path) -> None:
+    from production_rag.cli import _audit_bundle
+
+    bundle = tmp_path / "llm.jsonl"
+    bundle.write_text(
+        json.dumps({"key": {"model": "m"}, "value": {"model": "m"}}), encoding="utf-8"
+    )
+    assert _audit_bundle(bundle) == 0
+
+
+def test_cache_audit_on_a_missing_bundle_is_not_a_failure(tmp_path: Path) -> None:
+    from production_rag.cli import _audit_bundle
+
+    assert _audit_bundle(tmp_path / "nope.jsonl") == 0
+
+
+def test_the_answer_eval_arms_that_need_no_key_are_the_default() -> None:
+    from production_rag.providers import LOCAL_ARMS, MODEL_ARMS
+
+    assert set(LOCAL_ARMS) <= set(MODEL_ARMS)
+    assert all(MODEL_ARMS[a]["provider"] == "ollama" for a in LOCAL_ARMS)
