@@ -2,23 +2,56 @@
 
 Form: **action → technical specifics → measured outcome.** Numbers or it doesn't go on the resume.
 
+> Retrieval bullets are final. A generation/deployment bullet lands in session 3.
+
 ---
 
 ## Bullets
 
-- _..._
-- _..._
+- Built a retrieval evaluation harness over 2,155 pinned documentation pages (12.8M chars,
+  DuckDB/dbt/Dagster) scoring 7 retrieval arms × 3 chunking strategies against 184
+  span-labelled questions, and found the default hybrid configuration — reciprocal-rank
+  fusion of BM25 and dense vectors — scored **below BM25 alone** (0.602 vs 0.631 nDCG@10);
+  weighting the lexical arm and switching to score fusion recovered it to **0.658**.
+
+- Quantified the cross-encoder reranking tradeoff instead of assuming it: +6 nDCG points over
+  RRF hybrid, but only **+0.004 nDCG for 87× the latency** (781s vs 9s) over a weighted score
+  fusion — so the fusion tuning ships and the reranker is documented as the last-half-point
+  option.
+
+- Designed ground truth as `(doc_id, character span)` labels rather than chunk ids, so a
+  single labelling effort scores all three chunking strategies comparably; derived per-strategy
+  gold sets by span overlap, with 99.4–100% evidence coverage reported alongside every metric.
+
+- Ran query rewriting as a measured arm with a pre-registered prediction, and reported the
+  half that was wrong: retrieving with the rewrite *instead of* the original raised
+  exact-terminology recall to **0.913** (predicted to fall) while costing conceptual questions
+  **5.4 points** — conclusion "expand, don't replace", not "rewriting improves retrieval".
+
+- Wrote Okapi BM25 in-repo over a precomputed scipy sparse weight matrix (**0.37 ms** mean
+  query over 22,789 chunks) and exact numpy cosine search (**1.07 ms**), rejecting FAISS/HNSW
+  with a stated scale threshold rather than by default.
+
+- Made every published number reproducible offline: LLM and cross-encoder responses ship as
+  sorted JSONL bundles and `eval --replay` turns a cache miss into an error, verified with an
+  empty API key and an unreachable local model server.
 
 ## Which roles this supports
 
 - [ ] Data Scientist / ML
-- [ ] AI Engineer (LLM/NLP/CV)
+- [x] AI Engineer (LLM/NLP/CV)
 - [ ] Data Engineer
-- [ ] Data Analyst / Python Developer
+- [x] Data Analyst / Python Developer
 
 ## Keywords this project earns
 
 _Only list what you actually used and could be questioned on._
+
+RAG · hybrid retrieval · BM25 (Okapi, implemented) · dense retrieval · sentence-transformers ·
+bge-small-en-v1.5 · cross-encoder reranking · reciprocal rank fusion · score fusion ·
+query rewriting · retrieval evaluation (recall@k, nDCG, MRR, hit-rate) · ground-truth labelling ·
+chunking strategies · scipy sparse · numpy · OpenRouter · Ollama · provider abstraction ·
+fallback and graceful degradation · response caching and offline replay · pytest · ruff · uv · CI
 
 ---
 
