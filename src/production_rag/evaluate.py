@@ -329,3 +329,73 @@ def summarise(results: dict) -> str:
         markdown_table(results, metric="recall@5", by_category=True),
     ]
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# How precise is any of this?
+# ---------------------------------------------------------------------------
+def bootstrap_band(
+    values: Sequence[float],
+    *,
+    n: int,
+    trials: int = 20_000,
+    seed: int = 20260908,
+    alpha: float = 0.05,
+) -> tuple[float, float, float]:
+    """Where a mean over `n` of these questions would plausibly land.
+
+    Returns `(low, high, full_mean)` for a central `1 - alpha` interval.
+
+    This exists because the project reports differences in the third decimal
+    place between arms, and a reader is entitled to ask how much of that is the
+    question set. Resampling `n` questions without replacement from the full set
+    answers exactly that: it is the spread attributable to *which* questions were
+    asked, holding the system fixed. On this eval set a 60-question subset moves
+    recall@5 by about +/-0.10 at 95% -- wider than most of the gaps in the
+    tables, which is the honest frame for reading them.
+
+    Sampling is without replacement because the question being asked is "what if
+    I had verified a different 60 of these 184", not the textbook bootstrap's
+    "what if the population resembled my sample".
+    """
+    import random
+
+    pool = list(values)
+    if not pool:
+        return (0.0, 0.0, 0.0)
+    n = min(n, len(pool))
+    rng = random.Random(seed)
+    draws = sorted(statistics.fmean(rng.sample(pool, n)) for _ in range(trials))
+    low = draws[int((alpha / 2) * trials)]
+    high = draws[min(int((1 - alpha / 2) * trials), trials - 1)]
+    return (low, high, statistics.fmean(pool))
+
+
+def subset_bands(
+    results_path: Path,
+    *,
+    n: int,
+    metric: str = "recall@5",
+    strategy: str = "heading",
+    trials: int = 20_000,
+    seed: int = 20260908,
+) -> str:
+    """Sampling band per arm, read back out of a saved results file."""
+    payload = json.loads(Path(results_path).read_text(encoding="utf-8"))
+    by_arm: dict[str, list[float]] = {}
+    for row in payload["rows"]:
+        if row["strategy"] != strategy or not row["metrics"]:
+            continue
+        by_arm.setdefault(row["arm"], []).append(row["metrics"][metric])
+
+    lines = [
+        f"{metric} on `{strategy}`, 95% band for any {n} of {len(next(iter(by_arm.values()), []))} "
+        f"questions ({trials:,} resamples, seed {seed})",
+        "",
+        "| Arm | full set | low | high | width |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for arm, values in by_arm.items():
+        low, high, mean = bootstrap_band(values, n=n, trials=trials, seed=seed)
+        lines.append(f"| `{arm}` | {mean:.3f} | {low:.3f} | {high:.3f} | {high - low:.3f} |")
+    return "\n".join(lines)

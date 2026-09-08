@@ -138,3 +138,29 @@ def test_load_chunks_round_trips_the_heading_path(tmp_path: Path, sample_chunks:
 def test_main_dispatches_to_the_subcommand(docs_file: Path, tmp_path: Path) -> None:
     code = main(["stats", "--docs", str(docs_file), "--indexes", str(tmp_path / "none")])
     assert code == 0
+
+
+def test_verify_shuffles_by_default_so_a_partial_pass_is_a_sample() -> None:
+    args = build_parser().parse_args(["verify"])
+    assert args.shuffle is True
+    assert build_parser().parse_args(["verify", "--no-shuffle"]).shuffle is False
+
+
+def test_ask_defaults_to_the_arm_that_won_the_grid() -> None:
+    args = build_parser().parse_args(["ask", "why?"])
+    assert args.arm == "hybrid_score_weighted"
+    # The pre-generation refusal gate ships off; see generate.py for why.
+    assert args.min_top_score == 0.0
+
+
+def test_answer_eval_runs_every_provider_arm_unless_told_otherwise() -> None:
+    args = build_parser().parse_args(["answer-eval"])
+    assert args.model_arm_list is None
+    assert args.subset == 60
+    picked = build_parser().parse_args(["answer-eval", "--model-arm-list", "ollama-qwen"])
+    assert picked.model_arm_list == ["ollama-qwen"]
+
+
+def test_answer_eval_rejects_an_unknown_provider_arm() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["answer-eval", "--model-arm-list", "gpt-9"])

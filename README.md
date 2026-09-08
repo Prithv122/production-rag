@@ -217,7 +217,26 @@ question and then to say whether it did will say yes.
 **A human verifies a sample.** Nothing above establishes that a question is sensible or
 that its labelled passage is really the best evidence; only someone who knows the tools can
 say that. `production-rag verify` walks the set and records accept / edit / reject with the
-correction rate, and the headline table is restricted to the verified subset.
+correction rate.
+
+**Result of that pass: 60 of 184 questions reviewed, 60 accepted, 0 edited, 0 rejected — a
+correction rate of 0/60.** That number is reported as it came out, and it deserves more
+scepticism than a bad one would. Three things about it are worth stating plainly:
+
+- The screening in front of the human pass is not weak. 63 of 237 proposals were already
+  discarded automatically — 43 for a quote that does not appear in its source document, 20
+  for being too short. The questions reaching a reviewer are the ones that already survived
+  a verbatim-quote check, so a low correction rate is the expected outcome, not a surprising
+  one. It is evidence that the *screen* works, not that the questions are perfect.
+- A 0/60 rate cannot distinguish "the set is clean" from "the reviewer accepted too
+  readily". The interface makes accept the cheapest key, which is exactly the wrong default
+  for a measurement, and 124 questions remain unreviewed.
+- **The reviewed 60 were the first 60 in file order, which is not a random sample.** Their
+  scores sit at or below the lower edge of the resampling band for a 60-question subset
+  (table below) — consistently low rather than central. `verify` now walks the pending set
+  in seeded-shuffled order so that a partially-verified set is a random sample of the whole
+  one; the prefix bias in the first 60 cannot be undone retroactively and is disclosed
+  instead.
 
 ### Retrieval quality — measured
 
@@ -226,13 +245,14 @@ scored against document-span labels resolved per strategy. Evidence maps onto 10
 99.4% of questions for `fixed` / `heading` / `heading_ctx`, so the three columns are scored
 on the same set.
 
-> **Read the caveats before the numbers.** The questions have **not yet been human-verified**
-> — that pass is session 3, and the table will be re-cut on the verified subset. And the bulk
-> of the set was written by a model *from a passage it had just read*, which structurally
-> flatters lexical retrieval: the question tends to reuse vocabulary the passage contains.
-> That bias inflates the BM25 column specifically. The `conceptual` split, where the
-> generator was instructed to avoid the passage's distinctive terms, is the more trustworthy
-> comparison, and the hand-written cross-tool questions are the least contaminated of all.
+> **Read the caveats before the numbers.** 60 of the 184 questions have been human-verified
+> (0 corrections); the other 124 have not. The re-cut on the verified subset is below and it
+> changes no conclusion. And the bulk of the set was written by a model *from a passage it
+> had just read*, which structurally flatters lexical retrieval: the question tends to reuse
+> vocabulary the passage contains. That bias inflates the BM25 column specifically. The
+> `conceptual` split, where the generator was instructed to avoid the passage's distinctive
+> terms, is the more trustworthy comparison, and the hand-written cross-tool questions are
+> the least contaminated of all.
 
 **recall@5**
 
@@ -309,6 +329,47 @@ than assuming: issuing the gold quote itself as a query returns its chunk at **r
 the labels are correct and reachable — the questions are simply beyond every arm here. The
 best BM25 rank for any gold chunk was 183 on one question and outside the top 500 on another.
 n = 4, so this is a signal to build more of them, not a measurement.
+
+#### The re-cut on the human-verified subset — measured
+
+The point of a verification pass is to find out whether the conclusions survive it. Restricted
+to the 60 verified questions (`eval --replay --verified-only`, `heading`):
+
+| Arm | recall@5, all 184 | recall@5, verified 60 | nDCG@10, all 184 | nDCG@10, verified 60 |
+|---|---:|---:|---:|---:|
+| `bm25` | 0.695 | 0.617 | 0.631 | 0.538 |
+| `dense` | 0.555 | 0.483 | 0.499 | 0.438 |
+| `hybrid` (RRF) | 0.688 | 0.600 | 0.602 | 0.530 |
+| `hybrid_score` | 0.703 | 0.650 | 0.628 | 0.547 |
+| `hybrid_weighted` | 0.689 | 0.600 | 0.619 | 0.531 |
+| **`hybrid_score_weighted`** | **0.706** | **0.650** | **0.658** | **0.586** |
+
+**Every number falls, and every conclusion holds.** `hybrid_score_weighted` still wins both
+metrics; unweighted RRF hybrid is still below BM25 alone on nDCG (0.530 vs 0.538); score
+fusion still beats rank fusion; `heading` still beats `heading_ctx`. The ordering is what the
+project claims and the ordering is unchanged.
+
+The uniform 5–9 point drop is **not** a correction — the correction rate was 0/60, so these
+are the same questions with the same labels. It is a sample effect, and the honest way to
+size it is to resample (`production-rag band -n 60`, 20,000 draws of 60 questions from the
+177 answerable ones, without replacement):
+
+| Arm | full set | 95% band for any 60 | verified 60 |
+|---|---:|---:|---:|
+| `bm25` recall@5 | 0.695 | [0.600, 0.792] | 0.617 |
+| `hybrid_score_weighted` recall@5 | 0.706 | [0.617, 0.800] | 0.650 |
+| `bm25` nDCG@10 | 0.631 | [0.545, 0.718] | 0.538 |
+| `hybrid_score_weighted` nDCG@10 | 0.658 | [0.571, 0.745] | 0.586 |
+
+Three of the four land inside the band and near its lower edge; `bm25` nDCG@10 falls just
+below it.
+
+So the verified 60 are a *hard* slice, not a corrected one — which is exactly what you would
+expect from an ordered prefix rather than a random sample, and is why `verify` now shuffles
+(see above). **A 60-question subset moves a headline recall figure by ±0.10 at 95%.** That is
+the real precision of every number in this README, and it is larger than most of the gaps the
+tables are being used to argue about. The arm ordering is robust; the third decimal place is
+decorative.
 
 ### Reranking and query rewriting — measured on `heading`
 
