@@ -123,6 +123,20 @@ budget bugs — see [NOTES.md](NOTES.md).
 | Build | 2.5 s |
 | **Mean query latency** | **0.37 ms** |
 
+### Dense index — measured (`fixed` strategy)
+
+| | |
+|---|---|
+| Vectors | 14,660 × 384 float32 (`BAAI/bge-small-en-v1.5`) |
+| Size on disk | 23 MB |
+| **Exact query latency** | **2.38 ms** — full scan, no approximation |
+| Build (CPU) | ~40 min · ~6 chunks/s · ~1.5k tokens/s |
+
+The 2.38 ms is the number behind the no-ANN decision in §4: an exhaustive scan of every
+vector in the corpus costs single-digit milliseconds, so an approximate index would trade
+correctness for a saving that does not exist yet. The build time is the real cost here,
+and it is a one-off — see §7 and [NOTES.md](NOTES.md) for the caching fix.
+
 ### Retrieval quality — _pending, session 2_
 
 Requires ground truth: ~200 LLM-proposed question→gold-chunk pairs, ~60 of them

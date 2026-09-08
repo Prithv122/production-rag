@@ -230,9 +230,16 @@ lengths is roughly linear in token count, so a ~20× longer input is roughly ~20
 **Throughput per *text* is a meaningless unit for an encoder; throughput per *token* is
 the one that transfers.**
 
-The exact per-strategy build time is deliberately not stated here yet — the first full
-build had not completed when this was written, and an extrapolated figure is not a
-measurement. It gets filled in from a timed run in session 2.
+**Measured, once the first build actually finished:** the `fixed` index — 14,660 chunks —
+took **~40 minutes** on CPU. That is **~6 chunks/s**, or roughly **1.5k tokens/s**, against
+the 160 texts/s the toy benchmark promised. The other two strategies are larger (22,789 and
+24,120 chunks) and are still building; their times are not stated here until they are
+timed, because the earlier mistake in this section was quoting an extrapolation as a
+measurement.
+
+The payoff for that cost is the number in README §5: **2.38 ms** for an exact full-scan
+query over all 14,660 vectors. Embedding is slow once; searching is fast forever, which is
+precisely why an approximate index would be buying nothing at this scale.
 
 Consequence: a full three-strategy rebuild is slow enough to make the chunking × arm grid
 painful to iterate on. Fixes for session 2, in order of value:
