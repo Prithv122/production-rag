@@ -200,3 +200,64 @@ def test_results_are_saved_as_readable_json(tmp_path, corpus, questions, embedde
     path = save_results(results, tmp_path / "out" / "retrieval.json")
     assert json.loads(path.read_text(encoding="utf-8"))["config"]["n_questions"] == 3
     assert "recall@5" in summarise(results)
+
+
+# ---------------------------------------------------------------------------
+# sampling bands
+# ---------------------------------------------------------------------------
+def test_a_band_over_a_constant_set_has_zero_width():
+    from production_rag.evaluate import bootstrap_band
+
+    low, high, mean = bootstrap_band([0.5] * 40, n=10, trials=200)
+    assert (low, high, mean) == (0.5, 0.5, 0.5)
+
+
+def test_a_band_over_the_whole_set_collapses_to_the_mean():
+    from production_rag.evaluate import bootstrap_band
+
+    values = [0.0, 1.0, 1.0, 0.0, 1.0]
+    low, high, mean = bootstrap_band(values, n=len(values), trials=200)
+    assert low == high == pytest.approx(mean) == pytest.approx(0.6)
+
+
+def test_a_smaller_subset_gives_a_wider_band():
+    from production_rag.evaluate import bootstrap_band
+
+    values = [float(i % 2) for i in range(200)]
+    narrow = bootstrap_band(values, n=100, trials=3000)
+    wide = bootstrap_band(values, n=10, trials=3000)
+    assert (wide[1] - wide[0]) > (narrow[1] - narrow[0])
+
+
+def test_the_band_is_deterministic_from_the_seed():
+    from production_rag.evaluate import bootstrap_band
+
+    # Determinism is the property the README depends on: the quoted band has to
+    # come back from a re-run. (Two different seeds may well agree here -- with
+    # 0/1 values and n=20 the quantiles land on a coarse grid -- so that is not
+    # asserted.)
+    values = [float(i % 3 == 0) for i in range(100)]
+    assert bootstrap_band(values, n=20, trials=500, seed=1) == bootstrap_band(
+        values, n=20, trials=500, seed=1
+    )
+
+
+def test_an_empty_set_does_not_raise():
+    from production_rag.evaluate import bootstrap_band
+
+    assert bootstrap_band([], n=10) == (0.0, 0.0, 0.0)
+
+
+def test_subset_bands_reads_one_strategy_out_of_a_results_file(tmp_path):
+    import json
+
+    from production_rag.evaluate import subset_bands
+
+    path = tmp_path / "results.json"
+    rows = [
+        {"arm": "bm25", "strategy": "heading", "metrics": {"recall@5": v}}
+        for v in (1.0, 0.0, 1.0, 1.0)
+    ] + [{"arm": "bm25", "strategy": "fixed", "metrics": {"recall@5": 0.0}}]
+    path.write_text(json.dumps({"rows": rows}), encoding="utf-8")
+    rendered = subset_bands(path, n=2, trials=200)
+    assert "`bm25`" in rendered and "0.750" in rendered

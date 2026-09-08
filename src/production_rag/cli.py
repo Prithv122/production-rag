@@ -332,7 +332,17 @@ def cmd_verify(args: argparse.Namespace) -> int:
     opinion of itself. It is deliberately a terminal loop over the *unverified*
     questions only, so it can be done in several sittings, and it saves after
     every decision -- an interrupted session loses nothing.
+
+    **The pending set is walked in shuffled order.** Verification happens in
+    sittings, so at any moment the verified subset is a *prefix* of whatever
+    order this loop uses -- and a prefix of file order is not a random sample.
+    The first 60 questions verified in this project scored at the 2nd-14th
+    percentile of the bootstrap distribution over 60-question subsets, which
+    made "the verified numbers are lower" ambiguous between a real correction
+    and an unlucky slice. A seeded shuffle makes any partial verification an
+    unbiased sample of the set, so the two explanations stop being confounded.
     """
+    import random
     from dataclasses import replace
 
     from .groundtruth import load_questions, save_questions
@@ -344,6 +354,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
         for i, q in enumerate(questions)
         if q.verified == "unverified" and (not args.category or q.category == args.category)
     ]
+    if args.shuffle:
+        random.Random(args.seed).shuffle(pending)
     if not pending:
         print("nothing left to verify")
         return 0
@@ -502,6 +514,25 @@ def cmd_answer_eval(args: argparse.Namespace) -> int:
     print("\n" + format_table(summaries))
     print("\ngrounded, by category\n" + format_by_category(rows))
     print(f"\nwrote {args.out}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# band -- how much of a difference between two arms is the question set?
+# ---------------------------------------------------------------------------
+def cmd_band(args: argparse.Namespace) -> int:
+    from .evaluate import subset_bands
+
+    print(
+        subset_bands(
+            args.results,
+            n=args.n,
+            metric=args.metric,
+            strategy=args.strategy,
+            trials=args.trials,
+            seed=args.seed,
+        )
+    )
     return 0
 
 
@@ -752,6 +783,14 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--limit", type=int, default=60)
     verify.add_argument("--category", default="")
     verify.add_argument("--verifier", default="author")
+    verify.add_argument(
+        "--no-shuffle",
+        dest="shuffle",
+        action="store_false",
+        help="walk the pending questions in file order. Off by default: a partial "
+        "verification in file order is a prefix, not a sample",
+    )
+    verify.add_argument("--seed", type=int, default=20260908)
     verify.set_defaults(func=cmd_verify)
 
     evaluate = subparsers.add_parser("eval", help="run the arm x strategy grid")
@@ -775,6 +814,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_component_args(evaluate)
     evaluate.set_defaults(func=cmd_eval)
+
+    band = subparsers.add_parser(
+        "band", help="sampling band for a subset of the question set, from saved results"
+    )
+    band.add_argument("--results", type=Path, default=Path("eval/results/retrieval.json"))
+    band.add_argument("-n", type=int, default=60, help="subset size to resample")
+    band.add_argument("--metric", default="recall@5")
+    band.add_argument("--strategy", choices=sorted(CHUNKERS), default="heading")
+    band.add_argument("--trials", type=int, default=20_000)
+    band.add_argument("--seed", type=int, default=20260908)
+    band.set_defaults(func=cmd_band)
 
     cache = subparsers.add_parser("cache", help="bundle or restore the replay caches")
     cache.add_argument("action", choices=["export", "import"])
