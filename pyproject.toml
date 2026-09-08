@@ -18,6 +18,11 @@ dependencies = [
 [project.scripts]
 production-rag = "production_rag.cli:main"
 
+[project.optional-dependencies]
+embed = [
+    "sentence-transformers>=3.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
