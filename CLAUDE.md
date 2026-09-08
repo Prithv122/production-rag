@@ -27,6 +27,7 @@ OpenAI-compatible client, Ollama fallback · Pydantic answer contract · Gradio 
 - [ ] Real corpus, licence recorded (MIT / Apache-2.0 / Apache-2.0), pinned commit SHAs
 - [ ] ≥2 chunking strategies measured against each other, not asserted
 - [ ] Hybrid BM25 + vector retrieval with a reranking stage
+- [ ] Query rewriting as a *measured arm*, reported per question category
 - [ ] Citations back to source spans; refusal path when retrieval is weak
 - [ ] Eval numbers in the README: recall@k, nDCG, faithfulness, citation correctness
 - [ ] Deployed to HF Spaces and linkable
@@ -44,3 +45,8 @@ OpenAI-compatible client, Ollama fallback · Pydantic answer contract · Gradio 
   never downloads torch weights; real-model tests are `@pytest.mark.slow`. Project 20
   shipped a 209s suite and had to disclose it in its own README — don't repeat that.
 - **Never commit the generation cache's raw API keys**; cache keys are prompt hashes only.
+- **Not an agent.** No LLM-in-a-loop, no LangGraph, no tool orchestration — that is
+  project 43 (`43-agent-system`). Query rewriting is a single measured step, not a loop.
+- **LLM-dependent steps must stay replayable.** Query rewrites and generations both go
+  through the on-disk cache so `eval --replay` reproduces every published number with no
+  key and no network. Anything that can't be replayed can't be in the README.
