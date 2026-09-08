@@ -1,0 +1,38 @@
+# The image needs pyproject.toml, src/ and space/app.py. Everything below is
+# either large, rebuildable, or irrelevant to running the demo.
+#
+# corpus/ and indexes/ are 205 MB and 177 MB of gitignored build output. Without
+# this file they would be uploaded to the Docker daemon on every build.
+
+.git
+.github
+.venv
+venv
+
+corpus/
+indexes/
+.cache/
+eval/
+
+tests/
+docs/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+.env
+.env.local
+*.pem
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

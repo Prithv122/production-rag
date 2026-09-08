@@ -38,13 +38,20 @@ from huggingface_hub import snapshot_download
 
 from production_rag.generate import generate, link_citations, markdown_sources
 from production_rag.pipeline import Retriever
-from production_rag.providers import build_provider
+from production_rag.providers import MODEL_ARMS, build_provider
 
 INDEX_REPO = os.environ.get("INDEX_REPO", "Prithv122/production-rag-index")
 STRATEGY = "heading"
 DEFAULT_ARM = "hybrid_score_weighted"
 ARMS = ["bm25", "dense", "hybrid", "hybrid_score", "hybrid_score_weighted"]
 CACHE = Path(os.environ.get("CACHE_DIR", "/tmp/production-rag"))
+INDEX_DIR = os.environ.get("INDEX_DIR", "")
+
+#: Which generation arm the deployment uses. Configurable because a deployment
+#: is not always the same shape as the author's laptop: someone self-hosting
+#: next to their own Ollama needs no key at all, and pinning the arm in the
+#: source would force them to fork the demo to say so.
+MODEL_ARM = os.environ.get("MODEL_ARM", "nemotron-super")
 
 EXAMPLES = [
     "how do I read a parquet file in duckdb?",
@@ -56,14 +63,24 @@ EXAMPLES = [
 
 
 def _load() -> tuple[Retriever, str]:
-    local = snapshot_download(repo_id=INDEX_REPO, repo_type="dataset", allow_patterns=["*"])
-    root = Path(local)
+    # `INDEX_DIR` is set by the container image, which bakes the pinned dataset
+    # in at build time: a cold start that also downloads 61 MB measured 256 s
+    # locally, and Cloud Run gives a container 240 s to accept traffic. With the
+    # variable unset -- running the app directly -- behaviour is unchanged and
+    # the index is fetched from the Hub.
+    baked = Path(INDEX_DIR) if INDEX_DIR else None
+    if baked is not None and (baked / STRATEGY).is_dir():
+        root, source = baked, f"{INDEX_REPO} (baked into the image)"
+    else:
+        root = Path(snapshot_download(repo_id=INDEX_REPO, repo_type="dataset"))
+        source = INDEX_REPO
+
     from production_rag.cache import CachedEmbedder
     from production_rag.dense import SentenceTransformerEmbedder
 
     embedder = CachedEmbedder(SentenceTransformerEmbedder(), CACHE / "embeddings")
     retriever = Retriever.load(root, STRATEGY, embedder=embedder, chunks=_chunks(root))
-    return retriever, local
+    return retriever, source
 
 
 def _chunks(root: Path) -> dict:
@@ -80,8 +97,14 @@ def _chunks(root: Path) -> dict:
 
 
 RETRIEVER, INDEX_PATH = _load()
-HAS_KEY = bool(os.environ.get("OPENROUTER_API_KEY"))
-PROVIDER = build_provider("nemotron-super", cache_dir=CACHE / "llm", fallback=False)
+
+# Whether generation can run at all. A hosted arm needs OPENROUTER_API_KEY; a
+# local Ollama arm needs nothing. `fallback=False` for the same reason the
+# answer eval disables it: an answer silently produced by a different model than
+# the footer names is worse than an honest failure.
+NEEDS_KEY = MODEL_ARMS[MODEL_ARM]["provider"] != "ollama"
+CAN_GENERATE = (not NEEDS_KEY) or bool(os.environ.get("OPENROUTER_API_KEY"))
+PROVIDER = build_provider(MODEL_ARM, cache_dir=CACHE / "llm", fallback=False)
 
 
 def run(question: str, arm: str, k: int, rerank: bool, answer_it: bool):
@@ -104,11 +127,11 @@ def run(question: str, arm: str, k: int, rerank: bool, answer_it: bool):
 
     if not answer_it:
         return "_Generation is off — showing retrieval only._", "", table
-    if not HAS_KEY:
+    if not CAN_GENERATE:
         return (
-            "**Generation is disabled**: this Space has no `OPENROUTER_API_KEY` secret. "
-            "Retrieval below is unaffected — every retrieval number in the README "
-            "reproduces without a key.",
+            f"**Generation is disabled**: arm `{MODEL_ARM}` needs an `OPENROUTER_API_KEY` "
+            "and none is set. Retrieval below is unaffected — every retrieval number in "
+            "the README reproduces without a key.",
             "",
             table,
         )
@@ -139,7 +162,11 @@ with gr.Blocks(title="production-rag") as demo:
         "[the repository](https://github.com/Prithv122/production-rag).\n\n"
         f"Index: `{INDEX_REPO}` · strategy `{STRATEGY}` · "
         f"{len(RETRIEVER.chunks):,} chunks"
-        + ("" if HAS_KEY else " · **generation disabled (no API key set)**")
+        + (
+            f" · generation `{MODEL_ARM}`"
+            if CAN_GENERATE
+            else " · **generation disabled (no API key set)**"
+        )
     )
     with gr.Row():
         question = gr.Textbox(label="Question", scale=4, placeholder=EXAMPLES[0])
@@ -163,4 +190,11 @@ with gr.Blocks(title="production-rag") as demo:
     question.submit(run, [question, arm, k, rerank, answer_it], [answer_box, sources_box, results])
 
 if __name__ == "__main__":
-    demo.launch()
+    # Cloud Run injects $PORT and requires the process to listen on it, on all
+    # interfaces. Unset -- i.e. run directly -- and this is Gradio's own default
+    # of 127.0.0.1:7860, so a local run does not silently start binding 0.0.0.0.
+    port = os.environ.get("PORT")
+    if port:
+        demo.launch(server_name="0.0.0.0", server_port=int(port))
+    else:
+        demo.launch()

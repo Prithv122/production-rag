@@ -35,11 +35,15 @@ locally; HF Spaces hosting blocked, see above).
 - [x] Citations back to source spans; refusal path when retrieval is weak
 - [x] Eval numbers in the README: recall@k, nDCG, citation validity, grounding, refusal
       (faithfulness is **not** claimed — see README §5 on why no LLM judge was appointed)
-- [ ] **Deployed to HF Spaces and linkable — BLOCKED, deferred.** App written, verified
-      locally end-to-end, index published as a HF dataset. `hf repos create --type space
-      --space-sdk gradio` returns **402**: HF restricts Gradio Spaces on free `cpu-basic`
-      to PRO. Not buying PRO, and not substituting a static client-side rewrite, which
-      would stop the demo running the measured code. Blocker documented in README §6.
+- [ ] **Deployed and linkable — HF Spaces blocked; Cloud Run prepared, not yet deployed.**
+      HF returns **402** for a Gradio Space on free `cpu-basic`. Not buying PRO, and not
+      substituting a static client-side rewrite (that would stop the demo running the
+      measured code). Retargeted at **Google Cloud Run**: `space/Dockerfile` +
+      `space/DEPLOY.md`, image built and **verified locally end-to-end** (UI, retrieval,
+      citations, refusal, generation on/off; 62 s cold, 2.78 GB, CPU-only torch confirmed).
+      Remaining blocker is environmental: `gcloud` is not installed and Cloud Run requires
+      a billing-enabled GCP project. **Never put `OPENROUTER_API_KEY` in the image or the
+      repo — bind it as a Cloud Run secret.**
 - [x] Graceful degradation to Ollama when the API is unavailable — and, after session 3,
       *disabled inside `answer-eval`*, because in a comparison between models it silently
       substitutes one for another. See NOTES.md.
