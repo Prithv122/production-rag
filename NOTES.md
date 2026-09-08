@@ -220,17 +220,22 @@ between runs is not a published number.
 ## CPU embedding is the real bottleneck, and the benchmark lied
 
 Timing the encoder on short strings gave **160 texts/s**, which predicted ~2.4 minutes to
-embed a 22,789-chunk index. The actual full-corpus build ran **40+ minutes on the first
-strategy alone**.
+embed a 22,789-chunk index. That prediction is wrong by a wide margin: 13 minutes of wall
+time (≈65 CPU-minutes across ~5 cores) had not finished the 14,660-chunk `fixed` index,
+putting real throughput below **19 chunks/s** — at least 8× worse than the benchmark said.
 
 The benchmark was wrong because the strings were wrong. It used ~50-character sentences
 (~12 tokens); real chunks are ~1,000 characters (~250 tokens). Transformer cost at these
-lengths is roughly linear in token count, so a 20× longer input is ~20× slower — about
-8 texts/s, which is exactly what the real build shows. **Throughput per *text* is a
-meaningless unit for an encoder; throughput per *token* is the one that transfers.**
+lengths is roughly linear in token count, so a ~20× longer input is roughly ~20× slower.
+**Throughput per *text* is a meaningless unit for an encoder; throughput per *token* is
+the one that transfers.**
 
-Consequence: rebuilding all three strategies is ~1.5 hours, which makes the
-chunking × arm grid painful to iterate on. Fixes for session 2, in order of value:
+The exact per-strategy build time is deliberately not stated here yet — the first full
+build had not completed when this was written, and an extrapolated figure is not a
+measurement. It gets filled in from a timed run in session 2.
+
+Consequence: a full three-strategy rebuild is slow enough to make the chunking × arm grid
+painful to iterate on. Fixes for session 2, in order of value:
 
 1. **Cache embeddings by content hash.** `heading` and `heading_ctx` share a substantial
    amount of chunk text; today every strategy re-embeds from scratch.
