@@ -240,16 +240,22 @@ def gold_chunk_ids(
     for evidence in question.evidence:
         candidates = by_doc.get(evidence.doc_id, [])
         span = max(evidence.end - evidence.start, 1)
+        # The fallback is decided per evidence item, not per question: a
+        # cross-tool question with two spans in the same document must still get
+        # a gold chunk for its *second* span, and checking `gold` globally would
+        # let the first span's match suppress it.
+        matched: set[str] = set()
         best: tuple[float, str] | None = None
         for chunk in candidates:
             overlap = min(chunk.end, evidence.end) - max(chunk.start, evidence.start)
             share = overlap / span
             if share >= min_overlap or (evidence.quote and evidence.quote in chunk.text):
-                gold.add(chunk.chunk_id)
+                matched.add(chunk.chunk_id)
             if best is None or share > best[0]:
                 best = (share, chunk.chunk_id)
-        if best is not None and best[0] > 0 and not gold & {c.chunk_id for c in candidates}:
-            gold.add(best[1])
+        if not matched and best is not None and best[0] > 0:
+            matched.add(best[1])
+        gold |= matched
     return gold
 
 

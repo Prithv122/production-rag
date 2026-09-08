@@ -460,3 +460,20 @@ def test_an_unknown_doc_id_raises(tmp_path):
     )
     with _pytest.raises(ValueError, match="unknown doc_id"):
         load_hand_written(path, {})
+
+
+def test_two_spans_in_one_document_each_get_a_gold_chunk():
+    """The fallback is per evidence item. Deciding it per question would let the
+    first span's match suppress the second span's, silently halving the gold set
+    for a question whose evidence is split across one page."""
+    doc = make_doc()
+    first = spanned(doc, "Set on_schema_change to append_new_columns when the source gains")
+    second = spanned(doc, "Set on_schema_change to fail for strict pipelines")
+    question = Question("q", "text", "conceptual", (first, second), ("dbt",))
+
+    thirds = [
+        _chunk_at(doc, "t#0", 0, first.start + 20),
+        _chunk_at(doc, "t#1", first.start + 21, second.start + 20),
+        _chunk_at(doc, "t#2", second.start + 21, len(DOC_TEXT)),
+    ]
+    assert len(gold_chunk_ids(question, index_chunks_by_doc(thirds))) == 2
