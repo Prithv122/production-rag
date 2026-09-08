@@ -290,3 +290,164 @@ published number offline.
 Retrieval *numbers* are not in this session either: they need ground truth, and ground
 truth needs the LLM proposal pass plus the author's hand-verification. Session 1 ships the
 machinery and the metric definitions with hand-computed tests; session 2 ships the table.
+
+---
+
+# Session 2 — reranker, rewriting, providers, ground truth
+
+## The decision that shaped everything else: gold is a span, not a chunk
+
+The obvious way to store ground truth is "question Q is answered by chunk 47". I got two
+paragraphs into writing that before noticing it cannot work here. There are three chunking
+strategies, they produce 14,660 / 22,789 / 24,120 chunks, and **no chunk id is shared
+between them**. A chunk-level label belongs to exactly one strategy. Storing it that way
+would mean either abandoning the cross-strategy comparison — the thing the project exists
+to do — or labelling three times and then comparing numbers built on three different
+labellings, which is worse because it looks like a comparison.
+
+So a label is `(doc_id, start, end)` plus the verbatim quote at that span. Each chunker
+already records the document span each chunk came from, so `gold_chunk_ids` derives a
+strategy's gold set by overlap at scoring time. One labelling effort, three comparable
+evaluations, and the labels survive a change to `--max-chars`.
+
+The quote is not decoration. It is what lets a label be *re-verified* after a re-ingest: if
+the pinned SHA moves and offsets shift, the quote either still locates or the label is
+stale. Stale-and-loud beats wrong-and-quiet.
+
+**Bug found in my own fallback rule.** When no chunk covers ≥50% of a span, the code falls
+back to the best-overlapping chunk so a question never becomes unscoreable. The first
+version checked "does this document already have a gold chunk?" — globally, across all of
+the question's evidence. For a question with two spans *in the same document*, the first
+span's match therefore suppressed the second span's fallback, silently halving the gold set
+and depressing recall on exactly the multi-evidence questions the hybrid arm is supposed to
+win. Fixed to decide per evidence item; a regression test asserts two spans yield two chunks.
+
+## The generating model is not a reliable judge of its own output
+
+An LLM writing questions from a passage and then being scored on whether retrieval finds
+that passage is close to circular. Three defences, cheapest first.
+
+**The quote must exist.** 43 of 237 proposals (18%) claimed a quote that is not in the
+source document — usually a light paraphrase, occasionally an invention. Every one is
+rejected rather than becoming a mislabelled gold span. This check costs nothing and removes
+the single most common failure.
+
+**The category is computed, not claimed.** The model was asked to write one "literal" and
+one "conceptual" question per passage and to label which was which. Its label disagreed
+with the corpus-statistics categorisation on **72 of 184 questions (39%)**. The
+categorisation asks a checkable question — does the question share a token with its own
+evidence that appears in ≤50 of ~23,000 chunks? — instead of asking a model to grade
+itself. Spot-checking the disagreements, the computed label is the defensible one: a
+question the model called "literal" that never mentions `EXPLAIN` is not a literal query,
+whatever the model intended while writing it.
+
+**A human verifies a sample.** Neither check above can tell whether a question is *sensible*
+or whether its labelled passage is really the best evidence. That is the author's pass, and
+until it happens the retrieval numbers are provisional and labelled as such.
+
+Yield, for the record, because a pipeline that reports only its survivors is describing its
+filter: 120 passages → 237 proposals → 174 accepted (73%), with 43 rejected for a
+non-existent quote and 20 for being too short to be a real query. 0 context-dependent and 0
+duplicates — those filters exist and fired zero times, which is worth saying rather than
+quietly implying they did work.
+
+## A "supports structured output" model that returns no JSON, and the one-line fix
+
+`nemotron-3-super` is listed as honouring `response_format`, and session 1 verified that
+against the live catalogue rather than trusting a blog post. It still failed to return JSON
+on **30 of 120 passages**. The diagnosis was in the field I nearly did not record:
+`finish_reason`. Every failure was `length`, not `stop` — the model spends a long reasoning
+preamble ("We need to produce two questions: one literal, one conceptual...") and hit the
+1,600-token ceiling before emitting a character of JSON.
+
+The fix is a second pass over only the failures at 3× the budget. **All 30 recovered** —
+100%. Two things follow. First, "supports structured output" is a statement about the API
+contract, not about whether you will get JSON; a reasoning model needs headroom for the
+reasoning *and* the answer. Second, retrying only the failures cost 30 extra calls instead
+of re-running 120, because the successful responses were already cached under a key that
+includes `max_tokens` and so were untouched by the change.
+
+## Session 1's "worth asserting rather than assuming" turned out to be worth asserting
+
+Session 1 argued from a chars-per-token estimate that no chunk exceeds bge-small's 512-token
+window, and listed "confirm no silent truncation" as a session-2 task. It is not confirmed —
+it is false:
+
+| Strategy | chunks > 512 tokens | share | tokens discarded | chars/token (all) | chars/token (the offenders) |
+|---|---:|---:|---:|---:|---:|
+| `fixed` | 158 | 1.08% | 19,227 | 3.62 | **2.03** |
+| `heading` | 86 | 0.38% | 10,484 | 3.58 | **1.78** |
+| `heading_ctx` | 160 | 0.66% | 20,867 | 3.65 | **2.11** |
+
+My first hypothesis — code fences tokenize badly — is also wrong, and measurably so: the
+over-window chunks contain *less* code than average (3.8% vs 11.6% for `fixed`). Looking at
+the actual worst offenders gives the real answer. The single worst chunk in the `heading`
+index is 1,115 tokens from 1,119 characters — **1.00 characters per token** — and it is a
+markdown table separator row: a line of pipes and hyphens.
+
+**Markdown table rules are tokenizer poison.** They carry literally zero meaning and a
+single row can consume the entire encoder window. Second place goes to identifier-dense
+table bodies — DuckDB's encodings list, rows like `|770|` plus a backticked Java codepage
+name — at 1.4 chars/token.
+
+The fix belongs in normalisation: collapse table rules to a fixed short marker. It is
+deferred, and the reason is a cost I would rather state than hide — changing chunk text
+invalidates all three dense indexes *and* every cross-encoder score cached against those
+chunks, which is a full re-run of the evaluation, for an effect bounded below 1% of chunks.
+A parametrised `slow` test now asserts the measured share as an upper bound, so the number
+cannot silently grow while nobody is looking.
+
+The general lesson matches session 1's: **a budget in one unit, enforced against a limit in
+another unit, needs a measurement at the boundary, not an estimate.** Characters are still
+the right budget for the chunker — a token budget drags the tokenizer, and torch, into every
+test — but the conversion factor has a 3.6× spread that an average hides.
+
+## Reranking is a funnel stage, and it is not free
+
+The cross-encoder reads `(query, passage)` jointly, so it cannot be precomputed and never
+runs over the corpus — it rescores the pool the cheap arms produced. Measured on this
+machine at ~500-character passages: **~8 pairs/s idle, ~3 pairs/s under load**, for
+`ms-marco-MiniLM-L-6-v2` (22M parameters). That is why the larger `bge-reranker-base` (278M)
+is not the default: reranking is the single most repeated operation in the grid, and an
+order of magnitude more cost per pair would put a full evaluation out of reach on this
+hardware. Choosing the higher-scoring model without pricing it is exactly the reasoning this
+project exists to avoid.
+
+The pool is deliberately separate from `k`. Reranking a top-10 can only reorder ten chunks;
+the stage earns its cost by promoting a candidate that was at rank 34, and truncating to `k`
+before reranking would throw away precisely those candidates.
+
+Anecdotally — and it is an anecdote, the table is the evidence — the reranker *demoted* the
+correct chunk on the README's worked example, from rank 1 under plain hybrid to rank 4.
+Which is the point of running it as a measured arm rather than assuming it is an upgrade.
+
+## Replay has to work from a clean clone or it is not replay
+
+The project's rule is that every published number reproduces offline. That was already true
+for retrieval and false for anything touching an LLM, because the cache lived in a
+gitignored directory: "reproducible on the machine that produced the numbers" is not a
+property anyone else can check.
+
+The sharded one-file-per-entry layout is right for concurrent writes and wrong for git, so
+each cache exports to a single sorted JSONL and expands on import. `eval --replay` then
+turns a cache miss into an error rather than a live call. The embedding cache stays out —
+24,000 float32 vectors belong in a rebuild, not in a repository.
+
+Cache keys include everything that changes the output (provider, model, prompt, system
+prompt, temperature, `max_tokens`, whether structured output was requested) and nothing that
+does not. The API key is not in the key and is not stored; a test asserts that a secret
+placed in the environment never appears anywhere under the cache directory.
+
+## An operational note on the cost of a free tier
+
+The primary model runs at a **median 65 s per call** (p90 126 s, max 162 s). That is fine
+for a demo and structurally wrong for an evaluation loop: 184 questions × two rewrite modes
+× three strategies, done inline, is measured in hours of waiting on one connection.
+
+Two separations follow, and both are in the code rather than in a script I ran once. Network
+calls fan out across workers; *screening and scoring stay strictly serial*, because
+deduplication that depends on completion order would make the eval set depend on network
+timing, and interleaved retrieval would poison the per-arm latency that is itself a reported
+number. And the rewrite cache is **warmed before the grid runs**, so the latency the grid
+reports for the rewrite stage is a cache-read latency and is labelled as such — the real
+per-call latency lives in the cached responses.
