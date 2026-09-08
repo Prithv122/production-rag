@@ -6,10 +6,15 @@ own::
     production-rag ingest                 # clone at pinned SHAs, normalise
     production-rag index --strategy ...   # chunk, build BM25 + dense indexes
     production-rag search "..."           # query one arm, or the hybrid
+    production-rag ask "..."              # retrieve, then answer with citations
+    production-rag answer-eval            # score generation across the providers
     production-rag stats                  # corpus and index shape
 
 `ingest` and `index` need the network and (for `index`) the `embed` extra;
-`search` and `stats` run entirely off the built artefacts.
+`search` and `stats` run entirely off the built artefacts. `ask` additionally
+needs a generation provider -- an OpenRouter key or a local Ollama -- and
+`answer-eval` replays frozen rankings out of `eval/results/retrieval.json`, so
+it needs neither an index nor an encoder.
 """
 
 from __future__ import annotations
@@ -21,6 +26,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from .answers import DEFAULT_OUT as ANSWER_RESULTS_OUT
+from .answers import DEFAULT_RESULTS as ANSWER_RESULTS_IN
+from .answers import DEFAULT_SUBSET, FROZEN_ARM, FROZEN_STRATEGY
 from .bm25 import BM25Index
 from .bm25 import build_from_chunks as build_bm25
 from .chunking import CHUNKERS, USES_BREADCRUMB, Chunk, chunk_corpus
@@ -398,6 +406,106 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# ask -- retrieve, then answer with citations
+# ---------------------------------------------------------------------------
+def cmd_ask(args: argparse.Namespace) -> int:
+    from .generate import format_answer, generate
+
+    spec = ARMS[args.arm]
+    provider = _provider(args)
+    retriever = Retriever.load(
+        args.indexes,
+        args.strategy,
+        embedder=_embedder(args) if spec.semantic else None,
+        with_dense=spec.semantic,
+    )
+    result = retriever.retrieve(
+        args.question,
+        arm=args.arm,
+        k=args.k,
+        pool=args.pool,
+        reranker=_reranker(args) if spec.rerank else None,
+        rewriter=provider if spec.needs_llm else None,
+    )
+    top_score = result.ranked[0][1] if result.ranked else None
+    answer = generate(
+        args.question,
+        result.chunk_ids,
+        retriever.chunks,
+        provider,
+        top_score=top_score,
+        min_top_score=args.min_top_score,
+        sentences=args.sentences,
+    )
+    print(format_answer(answer))
+    if args.show_context:
+        print("\nRetrieved\n" + retriever.format(result))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# answer-eval -- the generation grid over the provider arms
+# ---------------------------------------------------------------------------
+def cmd_answer_eval(args: argparse.Namespace) -> int:
+    from .answers import (
+        DEFAULT_SEED,
+        format_by_category,
+        format_table,
+        load_frozen_retrievals,
+        run_grid,
+        save,
+        select_questions,
+    )
+    from .groundtruth import index_chunks_by_doc, load_questions
+
+    questions = [q for q in load_questions(args.questions) if q.verified != "rejected"]
+    if args.verified_only:
+        questions = [q for q in questions if q.verified in ("accepted", "edited")]
+    rankings = load_frozen_retrievals(
+        args.results, arm=args.retrieval_arm, strategy=args.strategy, k=args.k
+    )
+    questions = [q for q in questions if q.qid in rankings or not q.is_answerable]
+    if args.subset:
+        questions = select_questions(questions, n=args.subset, seed=args.seed or DEFAULT_SEED)
+    if not questions:
+        print("no questions to answer")
+        return 1
+
+    chunks = {c.chunk_id: c for c in load_chunks(args.indexes, args.strategy)}
+    by_doc = index_chunks_by_doc(chunks.values())
+    providers = {
+        arm: build_provider(arm, cache_dir=args.llm_cache, offline=args.replay)
+        for arm in (args.model_arm_list or list(MODEL_ARMS))
+    }
+
+    total = len(questions) * len(providers)
+    done = 0
+
+    def progress(row) -> None:
+        nonlocal done
+        done += 1
+        if done % 10 == 0 or done == total:
+            print(f"  {done}/{total}", flush=True)
+
+    print(f"{len(questions)} questions x {len(providers)} arms, frozen on {args.retrieval_arm}")
+    rows, summaries, config = run_grid(
+        questions,
+        rankings,
+        chunks,
+        providers,
+        by_doc=by_doc,
+        workers=args.workers,
+        k=args.k,
+        progress=progress,
+    )
+    save(args.out, rows, summaries, config)
+    print("\n" + format_table(summaries))
+    print("\ngrounded, by category\n" + format_by_category(rows))
+    print(f"\nwrote {args.out}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # cache -- bundle the LLM and rerank caches so replay works from a clean clone
 # ---------------------------------------------------------------------------
 LLM_BUNDLE = Path("eval/cache/llm.jsonl")
@@ -547,6 +655,55 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--pool", type=int, default=DEFAULT_POOL)
     _add_component_args(search)
     search.set_defaults(func=cmd_search)
+
+    ask = subparsers.add_parser("ask", help="retrieve, then answer with citations")
+    ask.add_argument("question")
+    ask.add_argument("--indexes", type=Path, default=INDEX_DIR)
+    ask.add_argument("--strategy", choices=sorted(CHUNKERS), default="heading")
+    ask.add_argument("--arm", choices=sorted(ARMS), default=FROZEN_ARM)
+    ask.add_argument("-k", type=int, default=10)
+    ask.add_argument("--pool", type=int, default=DEFAULT_POOL)
+    ask.add_argument("--sentences", type=int, default=4)
+    ask.add_argument(
+        "--min-top-score",
+        type=float,
+        default=0.0,
+        help="refuse before generating if the top retrieval score is below this. "
+        "0 disables it, which is the default -- see generate.py for the measurement "
+        "that says the fused score does not separate answerable from unanswerable here",
+    )
+    ask.add_argument("--show-context", action="store_true")
+    _add_component_args(ask)
+    ask.set_defaults(func=cmd_ask)
+
+    answer_eval = subparsers.add_parser(
+        "answer-eval", help="score generated answers across the provider arms"
+    )
+    answer_eval.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
+    answer_eval.add_argument("--indexes", type=Path, default=INDEX_DIR)
+    answer_eval.add_argument("--results", type=Path, default=ANSWER_RESULTS_IN)
+    answer_eval.add_argument("--out", type=Path, default=ANSWER_RESULTS_OUT)
+    answer_eval.add_argument("--strategy", choices=sorted(CHUNKERS), default=FROZEN_STRATEGY)
+    answer_eval.add_argument("--retrieval-arm", choices=sorted(ARMS), default=FROZEN_ARM)
+    answer_eval.add_argument("-k", type=int, default=10)
+    answer_eval.add_argument(
+        "--subset",
+        type=int,
+        default=DEFAULT_SUBSET,
+        help="stratified sample size; every unanswerable and cross_tool question is "
+        "kept regardless. 0 runs the whole set",
+    )
+    answer_eval.add_argument("--seed", type=int, default=0)
+    answer_eval.add_argument("--workers", type=int, default=4)
+    answer_eval.add_argument("--verified-only", action="store_true")
+    answer_eval.add_argument(
+        "--model-arm-list",
+        nargs="+",
+        choices=sorted(MODEL_ARMS),
+        help="which generation arms to run (default: all of them)",
+    )
+    _add_component_args(answer_eval)
+    answer_eval.set_defaults(func=cmd_answer_eval)
 
     stats = subparsers.add_parser("stats", help="corpus and index shape")
     stats.add_argument("--docs", type=Path, default=DOCS_PATH)
