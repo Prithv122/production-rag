@@ -84,7 +84,7 @@ docker push "${REGION}-docker.pkg.dev/${PROJECT}/demos/production-rag:v1"
 gcloud run deploy production-rag \
   --image "${REGION}-docker.pkg.dev/${PROJECT}/demos/production-rag:v1" \
   --region "$REGION" --allow-unauthenticated \
-  --memory 2Gi --cpu 2 --concurrency 4 --min-instances 0 --max-instances 2 --timeout 300 \
+  --memory 2Gi --cpu 2 --concurrency 80 --min-instances 0 --max-instances 2 --timeout 300 \
   --set-secrets OPENROUTER_API_KEY=openrouter-api-key:latest
 ```
 
@@ -94,7 +94,7 @@ gcloud run deploy production-rag \
 |---|---|---|
 | `--memory` | `2Gi` | torch runtime, the encoder, 22,789 chunk texts and a 35 MB vector matrix all live in the process. 1 Gi is too tight; 2 Gi leaves headroom for a request. |
 | `--cpu` | `2` | Encoder inference and model load are CPU-bound. 2 vCPU roughly halves cold start against 1. |
-| `--concurrency` | `4` | The default 80 assumes cheap I/O-bound handlers. These are CPU-bound encodes; letting 80 in at once turns one slow request into eighty. |
+| `--concurrency` | `80` (default) | **Corrected after the first deployment.** The original value here was `4`, reasoned from "these are CPU-bound encodes". That conflated HTTP concurrency with compute concurrency: a Gradio page load fires ~65 parallel static-asset requests, so with one instance up during a cold start, half the bundle returned **429** and the page hung on "Loading...". The edge must stay wide; compute is limited in-process by `demo.queue(default_concurrency_limit=2)`. |
 | `--min-instances` | `0` | Scale to zero. This is what keeps idle cost at zero, and the price is a cold start on the first request after idle. |
 | `--max-instances` | `2` | A cap is a spend limit. A public URL with unbounded autoscaling is an unbounded bill. |
 | `--timeout` | `300` | A generation call can take well over a minute on a free model. |

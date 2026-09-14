@@ -282,3 +282,51 @@ def test_markdown_sources_is_empty_for_an_uncited_answer(chunks, ranked):
 
     provider = FakeProvider([payload("no markers at all.")])
     assert markdown_sources(generate("q", ranked, chunks, provider)) == ""
+
+
+# ---------------------------------------------------------------------------
+# the empty-payload retry
+# ---------------------------------------------------------------------------
+def test_an_empty_json_object_triggers_one_retry_without_the_format_constraint(chunks, ranked):
+    # nemotron-3-super satisfies `response_format: json_object` with `{}`: it
+    # spends the budget reasoning and emits the empty object, which parses
+    # perfectly and answers nothing. Raising max_tokens does not help, because
+    # nothing was truncated -- so the retry drops the constraint instead.
+    provider = FakeProvider(["{}", payload("recovered on the retry [1].")])
+    answer = generate("q", ranked, chunks, provider)
+    assert not answer.refused
+    assert answer.cited_chunk_ids == [ranked[0]]
+    assert len(provider.prompts) == 2
+
+
+def test_a_payload_with_an_empty_answer_string_also_retries(chunks, ranked):
+    provider = FakeProvider(['{"sufficient": true, "answer": "   "}', payload("real [2].")])
+    answer = generate("q", ranked, chunks, provider)
+    assert not answer.refused and len(provider.prompts) == 2
+
+
+def test_the_retry_happens_once_and_a_second_empty_reply_refuses(chunks, ranked):
+    provider = FakeProvider(["{}", "{}"])
+    answer = generate("q", ranked, chunks, provider)
+    assert answer.refused and answer.refusal_reason == "unparseable"
+    assert len(provider.prompts) == 2, "exactly one retry, not a loop"
+
+
+def test_unparseable_prose_is_not_retried(chunks, ranked):
+    # Malformed output is not the retryable case; only a vacuous-but-valid one is.
+    provider = FakeProvider(["I will not emit JSON.", payload("unused [1].")])
+    answer = generate("q", ranked, chunks, provider)
+    assert answer.refused and answer.refusal_reason == "unparseable"
+    assert len(provider.prompts) == 1
+
+
+def test_a_genuine_refusal_is_not_mistaken_for_an_empty_payload(chunks, ranked):
+    provider = FakeProvider([payload(REFUSAL_TEXT, sufficient=False)])
+    answer = generate("q", ranked, chunks, provider)
+    assert answer.refusal_reason == "model" and len(provider.prompts) == 1
+
+
+def test_no_retry_when_the_format_constraint_was_never_requested(chunks, ranked):
+    provider = FakeProvider(["{}", payload("unused [1].")])
+    answer = generate("q", ranked, chunks, provider, json_object=False)
+    assert answer.refused and len(provider.prompts) == 1
