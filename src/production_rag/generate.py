@@ -264,6 +264,22 @@ class Answer:
         }
 
 
+def _is_empty_payload(text: str) -> bool:
+    """Did the model return valid JSON that carries no answer?
+
+    `{}` and `{"sufficient": true}` both parse and both say nothing. They are
+    worth distinguishing from unparseable prose because the remedy differs: this
+    one is retryable, malformed output generally is not.
+    """
+    if not text or not text.strip():
+        return True
+    try:
+        payload = extract_json(text)
+    except ValueError:
+        return False
+    return isinstance(payload, dict) and not str(payload.get("answer", "")).strip()
+
+
 def _split_marker(group: str) -> list[int]:
     return [int(part) for part in re.split(r"[,;]", group) if part.strip()]
 
@@ -387,6 +403,26 @@ def generate(
             max_tokens=max_tokens,
             json_object=json_object,
         )
+        # A reasoning model under `response_format: json_object` can satisfy the
+        # constraint with the *empty* object: it spends its budget thinking and
+        # then emits `{}`, which parses perfectly and answers nothing. Observed
+        # on nemotron-3-super, intermittently and per-prompt -- raising
+        # max_tokens does not fix it, because the model is not being truncated.
+        #
+        # So the retry drops the constraint rather than widening it. This is the
+        # same conclusion session 2 reached from the other direction: structured
+        # output on this model is a capability claim, not a guarantee, which is
+        # why `extract_json` exists to repair prose-wrapped JSON. Letting the
+        # model answer in its natural shape and repairing that is more reliable
+        # than insisting on a shape it satisfies vacuously.
+        if json_object and _is_empty_payload(response.text):
+            response = provider.complete(
+                prompt,
+                system=ANSWER_SYSTEM,
+                temperature=0.0,
+                max_tokens=max_tokens,
+                json_object=False,
+            )
     except ProviderError as exc:
         return Answer(
             question=question,

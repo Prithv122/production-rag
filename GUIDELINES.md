@@ -23,8 +23,8 @@ numpy search — no ANN at this corpus size) · cross-encoder reranker
 (ms-marco-MiniLM-L-6-v2) · OpenRouter's OpenAI-compatible endpoint over stdlib `urllib`
 (no client library — Ollama's endpoint is a different shape anyway), Ollama fallback
 (`qwen2.5:7b-instruct-q3_K_M`) · dataclass answer contract over the existing JSON-repair
-path (**not** Pydantic — deviation reasoned in NOTES.md) · Gradio (written and verified
-locally; HF Spaces hosting blocked, see above).
+path (**not** Pydantic — deviation reasoned in NOTES.md) · Gradio on **Google Cloud Run**
+(HF Spaces blocked at 402/PRO).
 
 ## Acceptance criteria
 
@@ -35,19 +35,20 @@ locally; HF Spaces hosting blocked, see above).
 - [x] Citations back to source spans; refusal path when retrieval is weak
 - [x] Eval numbers in the README: recall@k, nDCG, citation validity, grounding, refusal
       (faithfulness is **not** claimed — see README §5 on why no LLM judge was appointed)
-- [ ] **Deployed and linkable — HF Spaces blocked; Cloud Run prepared, not yet deployed.**
-      HF returns **402** for a Gradio Space on free `cpu-basic`. Not buying PRO, and not
-      substituting a static client-side rewrite (that would stop the demo running the
-      measured code). Retargeted at **Google Cloud Run**: `space/Dockerfile` +
-      `space/DEPLOY.md`, image built and **verified locally end-to-end** (UI, retrieval,
-      citations, refusal, generation on/off; 62 s cold, 2.78 GB, CPU-only torch confirmed).
-      Remaining blocker is environmental: `gcloud` is not installed and Cloud Run requires
-      a billing-enabled GCP project. **Never put `OPENROUTER_API_KEY` in the image or the
-      repo — bind it as a Cloud Run secret.**
+- [x] **Deployed and linkable — Google Cloud Run.**
+      <https://production-rag-385330416945.asia-south1.run.app> · `asia-south1` ·
+      2 GiB / 2 vCPU / min 0 / max 2. HF Spaces stayed blocked at 402/PRO; no static rewrite.
+      Cold HTTP 24.9 s, warm 0.21 s (Cloud Run) — kept separate from the local container's
+      62 s start → first HTTP 200, which measures a different thing.
+      **Two defects open on the live revision, fixed in code and awaiting a redeploy:**
+      cold page loads 429 (revision runs `--concurrency 4`; must be `80`, with compute capped
+      by `demo.queue`), and generation refuses as `unparseable` (nemotron satisfies
+      `response_format` with `{}`; retry-without-constraint added). See PROJECT_SUMMARY.md §12.
+      **`OPENROUTER_API_KEY` lives only in Secret Manager — never the image, repo or a CLI arg.**
 - [x] Graceful degradation to Ollama when the API is unavailable — and, after session 3,
       *disabled inside `answer-eval`*, because in a comparison between models it silently
       substitutes one for another. See NOTES.md.
-- [ ] Ship gate passes (`/ship`)
+- [x] Ship gate passes (`/ship`) — 354 fast + 18 slow tests, ruff clean, CI green
 
 ## Project-specific notes
 

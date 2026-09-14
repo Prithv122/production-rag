@@ -8,13 +8,15 @@
 **Prebuilt index:** [`Prithv122/production-rag-index`](https://huggingface.co/datasets/Prithv122/production-rag-index) · **Demo:** [`space/`](space/), runnable locally — see §6
 **Stack:** Python 3.12 · scipy sparse (own BM25) · sentence-transformers · OpenRouter + Ollama · Gradio
 
-> **The demo is containerised and verified, but not yet hosted.** Hugging Face now returns
-> `402 Payment Required` for a Gradio Space on free `cpu-basic` (only static Spaces are free),
-> and rewriting the demo as a client-side static page would stop it running the code these
-> numbers came from — so it was not. Instead there is a [Dockerfile](space/Dockerfile) and a
-> [Cloud Run runbook](space/DEPLOY.md); the image has been **built and verified end-to-end
-> locally** (retrieval, citations, refusal, with and without a generation key: 62 s cold
-> start, 2.78 GB). The remaining step needs a billing-enabled GCP project. See §6.
+**Live demo:** <https://production-rag-385330416945.asia-south1.run.app> (Google Cloud Run, `asia-south1`)
+
+> **Deployed, with two open defects on the live revision.** Retrieval on production is verified
+> and returns scores byte-identical to local. **Generation is currently broken there** (the
+> model satisfies `response_format` with an empty `{}`, so every request refuses as
+> `unparseable`), and **cold page loads return 429** on roughly half the Gradio asset bundle
+> because the revision runs `--concurrency 4`. Both are root-caused and fixed in this commit;
+> neither is live until the image is rebuilt and redeployed. See
+> [PROJECT_SUMMARY.md §12](PROJECT_SUMMARY.md) and [space/DEPLOY.md](space/DEPLOY.md).
 
 ---
 
@@ -673,13 +675,18 @@ The container is verified locally, not merely written:
 | Refusal on the unanswerable example | ✅ "Refused (model)", no citations |
 | Generation **disabled** without a key | ✅ banner shown, retrieval unaffected |
 | Generation **enabled** (`MODEL_ARM=ollama-qwen`) | ✅ answered in 38.5 s |
-| Cold start / warm response | ✅ **62 s** / 0.008 s |
+| Cold start / warm response (local container) | ✅ **62 s** / 0.008 s |
+| Cloud Run cold / warm **HTTP response** | ✅ **24.9 s** / **0.21 s** |
 | Image size, CPU-only torch confirmed | ✅ 2.78 GB, `torch 2.14.0+cpu`, no `nvidia-*` |
 
-The OpenRouter generation path inside the container is **not** verified, because the free-tier
-daily cap was exhausted (§5); it is bound as a Cloud Run secret at deploy time and the key is
-deliberately absent from the image and this repository. What remains is `gcloud` and a
-billing-enabled project.
+The two Cloud Run rows measure something different from the local row and are not a
+like-for-like comparison: the local **62 s** is *process start → first HTTP 200* (boot, model
+load, index load), while the Cloud Run figures are *HTTP response latency* against a service
+whose instance may already have passed its startup probe, with Cloud Run's startup CPU boost
+applied. Both are kept because they characterise different layers.
+
+The OpenRouter key is bound as a Cloud Run secret via Secret Manager and is deliberately absent
+from the image, this repository and any command line.
 
 ### Reproducing the evaluation
 

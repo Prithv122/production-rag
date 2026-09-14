@@ -189,6 +189,15 @@ with gr.Blocks(title="production-rag") as demo:
     go.click(run, [question, arm, k, rerank, answer_it], [answer_box, sources_box, results])
     question.submit(run, [question, arm, k, rerank, answer_it], [answer_box, sources_box, results])
 
+# Limit *compute* concurrency here rather than HTTP concurrency at the edge.
+# These two are not the same thing, and conflating them broke the first
+# deployment: capping Cloud Run at `--concurrency 4` also capped the ~65 static
+# asset requests a Gradio page fires on load, so the first visitor after a
+# scale-to-zero cold start got 429s on half the bundle and a page stuck on
+# "Loading...". Static assets are trivially cheap and highly parallel; only the
+# query handler is CPU-bound. So the edge stays wide and the queue is narrow.
+demo.queue(default_concurrency_limit=2)
+
 if __name__ == "__main__":
     # Cloud Run injects $PORT and requires the process to listen on it, on all
     # interfaces. Unset -- i.e. run directly -- and this is Gradio's own default
