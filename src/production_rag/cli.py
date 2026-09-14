@@ -14,7 +14,12 @@ own::
 `search` and `stats` run entirely off the built artefacts. `ask` additionally
 needs a generation provider -- an OpenRouter key or a local Ollama -- and
 `answer-eval` replays frozen rankings out of `eval/results/retrieval.json`, so
-it needs neither an index nor an encoder.
+it needs no encoder and no torch -- but it does need the chunk *text* those
+rankings point at, which is gitignored, so `index --no-dense --strategy
+heading` is a prerequisite on a clean clone. (An earlier version of this line
+said it needed "neither an index nor an encoder". Half right, and the wrong
+half to get wrong: it fails with a bare `FileNotFoundError` on
+`indexes/heading/chunks.jsonl`.)
 """
 
 from __future__ import annotations

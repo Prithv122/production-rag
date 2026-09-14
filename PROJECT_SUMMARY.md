@@ -364,6 +364,13 @@ calls, no rebuild — the script is passed base64-encoded in an env var and run 
 `--command python --args "^@^-c@exec(...)"`, so it executes inside *the exact image the service
 runs*. **This is the technique worth keeping from the whole episode.**
 
+> **What kind of numbers these are.** Everything in this section is a *diagnostic observation*
+> against a live third-party model on a free tier, not a published benchmark: single runs, a
+> stochastic endpoint, and no offline replay. They are recorded because they are what the
+> decision rests on, and they are kept separate from the tables in the README, every one of
+> which replays from the committed bundle with no key. Do not cite the token counts below as a
+> property of the model; cite them as what this service saw.
+
 #### Root cause: two defects wearing one refusal reason
 
 **1. `max_tokens` is not an answer budget on a reasoning model — it is shared with the thinking

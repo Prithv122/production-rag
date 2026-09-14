@@ -602,10 +602,17 @@ place in this project where the refusal path is doing real work. n = 4.
 git clone https://github.com/Prithv122/production-rag.git
 cd production-rag
 uv sync
-uv run pytest
+uv run pytest -m "not slow"
 ```
 
-That runs the full test suite with no API key, no network and no torch.
+That runs 365 tests with no API key, no network and no torch — the fast suite CI runs, in
+about two seconds. The marker is load-bearing rather than decorative: the 18 `slow` tests
+exercise the real embedding model and the cross-encoder, so they need the optional extra and
+they are the only reason this repo would ever pull torch.
+
+```bash
+uv sync --extra embed && uv run pytest      # all 383, ~60 s
+```
 
 To build the corpus and indexes (needs the network once, and the embedding model):
 
