@@ -16,7 +16,9 @@ import json
 import pytest
 
 from conftest import FakeProvider, make_chunk
+from production_rag.cache import JsonCache
 from production_rag.generate import (
+    ANSWER_SYSTEM,
     DEFAULT_CONTEXT_CHARS,
     MAX_PASSAGE_CHARS,
     REFUSAL_TEXT,
@@ -27,7 +29,7 @@ from production_rag.generate import (
     generate,
     parse_citations,
 )
-from production_rag.providers import LLMResponse
+from production_rag.providers import CachedProvider, LLMResponse
 
 
 def payload(answer: str, *, sufficient: bool = True) -> str:
@@ -355,16 +357,36 @@ def test_still_truncated_after_the_retry_refuses_as_truncated_not_unparseable(ch
     assert len(provider.prompts) == 2
 
 
-def test_a_cached_response_is_never_retried(chunks, ranked):
-    # Replay must reproduce what was recorded. Three of the 180 committed answer
-    # entries would otherwise trigger this branch, quietly rewriting published
-    # numbers on a machine that happens to be online.
-    cached = LLMResponse(
-        text="{}", model="fake-model", provider="fake", finish_reason="length", cached=True
+def _warm(cache_dir, chunks, ranked, text):
+    """Put one response in a cache under the key `generate` will look up."""
+    cache = JsonCache(cache_dir)
+    prompt = build_prompt("q", build_passages(ranked, chunks)[0], sentences=4)
+    CachedProvider(FakeProvider([text]), cache).complete(
+        prompt, system=ANSWER_SYSTEM, max_tokens=700, json_object=True
     )
-    provider = FakeProvider([cached, payload("must not be reached [1].")])
-    answer = generate("q", ranked, chunks, provider)
-    assert answer.refused and len(provider.prompts) == 1
+    return cache
+
+
+def test_replay_never_retries(tmp_path, chunks, ranked):
+    # Replay must reproduce what was recorded, and a retry is a live call: its
+    # key would miss and surface as `provider_error` where the recorded run had
+    # a refusal. Three of the 180 committed answer entries reach this branch.
+    cache = _warm(tmp_path, chunks, ranked, "{}")
+    replaying = CachedProvider(FakeProvider(fail=True), cache, offline=True)
+    answer = generate("q", ranked, chunks, replaying, max_tokens=700)
+    assert answer.refused and answer.refusal_reason == "unparseable"
+
+
+def test_a_cached_but_unusable_reply_is_still_retried_when_live(tmp_path, chunks, ranked):
+    # The opposite of the above, and the reason the gate is replay rather than
+    # `cached`: observed on the deployed service, where asking the same question
+    # twice served the first failure back out of the cache and refused forever
+    # after. The retry's own result is cached under its own key, so a later
+    # repeat still costs one call rather than two.
+    cache = _warm(tmp_path, chunks, ranked, "{}")
+    live = CachedProvider(FakeProvider([payload("recovered [1].")]), cache)
+    answer = generate("q", ranked, chunks, live, max_tokens=700)
+    assert not answer.refused and answer.cited_chunk_ids == [ranked[0]]
 
 
 def test_unparseable_prose_is_not_retried(chunks, ranked):

@@ -383,20 +383,7 @@ class CachedProvider:
             max_tokens=max_tokens,
             json_object=json_object,
         )
-        # A response that stopped at `finish_reason='length'` is not a
-        # completion, so it is not memoised. Without this the answer path's
-        # budget retry has a nasty second-order bug: the *first* ask widens the
-        # budget and succeeds, but the truncated first response is now cached
-        # under the original key, so asking the same question again serves the
-        # failure from cache with `cached=True` -- which is exactly the flag
-        # that tells `generate` it must not retry. The question would answer
-        # once and refuse forever after.
-        #
-        # This is a write rule only. Truncated entries already in a committed
-        # bundle are still read, so replay is untouched: the published answer
-        # table includes two of them and reproduces unchanged.
-        if str(response.finish_reason) != "length":
-            self.cache.put(key, response.as_dict())
+        self.cache.put(key, response.as_dict())
         return response
 
 
@@ -540,6 +527,26 @@ MODEL_ARMS: dict[str, dict[str, Any]] = {
         "note": "different family, less than half the parameters -- isolates scale",
     },
 }
+
+
+def is_replaying(provider: LLMProvider) -> bool:
+    """Is this provider stack forbidden from calling out?
+
+    Retrying a response is a live-call remedy, so replay must not do it: a
+    widened or unconstrained retry is a different cache key, it would miss, and
+    the miss would surface as a `provider_error` where the recorded run had a
+    refusal. That is not hypothetical -- it silently moved a published number
+    for one arm between sessions 5 and 7.
+
+    Note what this deliberately does *not* gate on: whether the individual
+    response came from cache. Outside replay, a cached-but-unusable reply
+    should still be retried, or a question that failed once refuses forever
+    after -- observed live on the deployed service, where asking the same
+    question twice served the first failure straight back out of the cache and
+    `cached=True` was exactly the flag suppressing the remedy. The retry's own
+    result is cached under its own key, so the repeat is served from cache too.
+    """
+    return bool(getattr(provider, "offline", False))
 
 
 def answer_budget(arm: str, default: int) -> int:

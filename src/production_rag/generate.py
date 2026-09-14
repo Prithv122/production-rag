@@ -66,7 +66,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .chunking import Chunk
-from .providers import LLMProvider, LLMResponse, ProviderError, extract_json
+from .providers import (
+    LLMProvider,
+    LLMResponse,
+    ProviderError,
+    extract_json,
+    is_replaying,
+)
 
 #: How much retrieved text to put in front of the model. Ten `heading` chunks
 #: average well under this; the cap exists so a pathological long chunk cannot
@@ -306,6 +312,7 @@ def _retry_kwargs(
     json_object: bool,
     max_tokens: int,
     retry_multiplier: int,
+    replaying: bool,
 ) -> dict[str, Any] | None:
     """What to change on a second attempt, or `None` if the reply is usable.
 
@@ -330,11 +337,12 @@ def _retry_kwargs(
     :func:`extract_json` repair the model's natural output -- which is the job
     that function already existed to do.
 
-    `cached` short-circuits both. A cached response is the recorded outcome, and
-    retrying it would quietly rewrite published numbers: three of the 180
-    committed answer entries would otherwise trigger this.
+    `replaying` short-circuits both, because a retry is a live call and replay
+    must reproduce what was recorded rather than go looking for something
+    better. Three of the 180 committed answer entries would otherwise trigger
+    this branch and move a published number.
     """
-    if response.cached:
+    if replaying:
         return None
     if str(response.finish_reason) == "length":
         return {"max_tokens": max_tokens * retry_multiplier, "json_object": json_object}
@@ -476,6 +484,7 @@ def generate(
             json_object=json_object,
             max_tokens=max_tokens,
             retry_multiplier=retry_multiplier,
+            replaying=is_replaying(provider),
         )
         if retry is not None:
             logger.warning(
