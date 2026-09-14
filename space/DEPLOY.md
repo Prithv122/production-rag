@@ -67,7 +67,7 @@ gcloud run deploy production-rag \
   --allow-unauthenticated \
   --memory 2Gi \
   --cpu 2 \
-  --concurrency 4 \
+  --concurrency 80 \
   --min-instances 0 \
   --max-instances 2 \
   --timeout 300 \
@@ -131,7 +131,27 @@ image already present locally), not estimated.
 | Warm page response | **0.008 s** |
 | Warm query, retrieval only | < 1 s |
 | Warm query, generation (`ollama-qwen`, 7B on CPU) | 19–39 s |
-| Cloud Run cold start | **not yet measured — needs the deploy** |
+| **Cloud Run cold start** (rev `00002-dtq`, `asia-south1`) | **39.2 s** server-side on `/`, 39.9 s browser TTFB |
+| **Cloud Run warm response** | **0.065 s** |
+
+The Cloud Run cold figure is a real scale-to-zero cold start — the instance-start log line reads
+`Reason: AUTOSCALING`, and the request that triggered it arrived ~20 ms earlier. It includes the
+2.78 GB image pull, which the local container's 62 s figure excludes — and it is nonetheless the
+*smaller* number, because Cloud Run applies startup CPU boost and this laptop does not. **The two
+are not the same benchmark and must not be presented as one.** Revision `00001-r47` measured
+24.9 s by the same method, so treat **~25–40 s** as the range rather than 39.2 s as a constant.
+
+> ### Measuring a cold start: close the tab first
+>
+> A Gradio page holds an open `/queue/data` SSE stream, and **Cloud Run counts an open streaming
+> request as an active request** — so an instance never retires while any browser tab has the
+> demo open. Two 17-minute "idle" windows here produced 1.25 s loads that looked like
+> implausibly fast cold starts; they were the same instance, never having scaled down.
+>
+> This is also a **billing** fact, not just a measurement one: `--min-instances 0` does not mean
+> zero cost while someone has the demo open in a background tab. To measure a cold start, close
+> every tab pointed at the service, wait ~15 minutes, then load it once — and confirm from the
+> logs that the instance start says `AUTOSCALING` rather than `DEPLOYMENT_ROLLOUT`.
 
 Two honest caveats on those numbers:
 
@@ -151,3 +171,48 @@ packages). The default CUDA wheel would have added roughly another 2 GB on top o
 remaining levers, none taken here because each costs a feature: drop the cross-encoder rerank
 checkbox (removes nothing — same `transformers`), drop Gradio for a smaller server, or move
 the encoder to an API instead of running it in-process.
+
+
+---
+
+## Probing the deployed image without handling the key
+
+`OPENROUTER_API_KEY` never enters a local shell or an agent session, which makes "what does the
+provider actually return in production?" surprisingly hard to answer. The answer is a **one-off
+Cloud Run job on the image digest the service is running**, with the secret bound the same way
+the service binds it. The probe runs beside the secret; the secret never travels.
+
+```bash
+REG=asia-south1-docker.pkg.dev/production-rag-2026/production-rag/production-rag
+DIGEST=$(gcloud run revisions describe production-rag --region asia-south1 \
+           --format='value(spec.containers[0].image)')
+
+# The script is passed base64-encoded in an env var, so no rebuild is needed and
+# the bootstrap contains no commas -- gcloud splits --args on commas unless you
+# give it the ^delim^ prefix.
+B64=$(base64 -w0 probe.py)
+gcloud run jobs create probe-openrouter \
+  --image "$DIGEST" --region asia-south1 \
+  --memory 2Gi --cpu 2 --task-timeout 900s --max-retries 0 \
+  --set-secrets OPENROUTER_API_KEY=openrouter-api-key:latest \
+  --set-env-vars "PROBE_B64=$B64" \
+  --command python \
+  --args="^@^-c@exec(__import__('base64').b64decode(__import__('os').environ['PROBE_B64']))"
+
+gcloud run jobs execute probe-openrouter --region asia-south1 --wait
+gcloud logging read \
+  'resource.type="cloud_run_job" AND labels."run.googleapis.com/execution_name"="<execution>"' \
+  --limit 200 --format='value(textPayload)' --order asc
+gcloud run jobs delete probe-openrouter --region asia-south1   # it holds the secret binding
+```
+
+Three rules that made this useful rather than merely clever:
+
+- **Pin the digest, not the tag.** The point is to observe the code that is actually serving.
+- **Print the response envelope, never the environment.** The reply cannot contain the key; a
+  stray `os.environ` dump can.
+- **Budget the calls.** The free tier is 50 requests/day account-wide. The probe that found
+  §12.2 cost about 20, and roughly half of those were upstream 502s.
+
+Delete the job when finished. It carries a secret binding and there is no reason to leave one
+lying around for a diagnosis that is over.

@@ -618,3 +618,117 @@ meaningless. A small model does not reliably distinguish an example from context
 anything concrete in the prompt as material. The example is now shouty placeholder text
 (`FIRST SENTENCE OF THE ANSWER [2].`), which demonstrates marker placement and offers
 nothing worth stealing.
+
+
+---
+
+## The production generation bug, and three wrong diagnoses before the right one
+
+Generation refused with `Refused (unparseable)` on every request to the deployed service for
+two revisions. The interesting part is not the fix — it is that the fix was attempted twice
+before anyone had looked at a single real response.
+
+### Why nobody had looked
+
+`OPENROUTER_API_KEY` lives only in Secret Manager, by a standing rule: it never enters the
+image, the repository, or an agent session. That rule is right, and it had a cost — it made
+"what does the provider actually return?" the one question nobody could cheaply ask. Sessions 5
+and 6 both reasoned from the *shape of the refusal* instead, and both guessed wrong:
+
+- **Session 5:** the model satisfies `response_format: json_object` with the empty object `{}`.
+  Real, but a symptom.
+- **Session 6:** the reply arrives with `content: null` and the text in OpenRouter's separate
+  `reasoning` field. Simply false — `content` is populated on every response.
+
+The unlock was realising the key does not have to travel to the developer if the code travels to
+the key: a **one-off Cloud Run job on the deployed image digest** with `--set-secrets`, running a
+probe script passed base64-encoded in an env var. No rebuild, no key locally, and the probe
+executes inside the exact image serving traffic. The recipe is in `space/DEPLOY.md`.
+
+### What the probe found
+
+`finish_reason='length'`, with **504–857 of the 700 completion tokens spent reasoning**.
+
+`max_tokens` is not an answer budget on a reasoning model. It is a *completion* budget, shared
+with the thinking trace, and the trace goes first. At 700 tokens the model never reaches the
+JSON. What comes back depends on how far it got:
+
+| How far it got | What arrives |
+|---|---|
+| still thinking | the reasoning trace echoed into `content` (identical to `reasoning`) |
+| started the JSON | the object truncated mid-string |
+| opened and closed the object | a bare `{}` |
+
+All three are the same defect, and the third is exactly what session 5 saw. That also explains
+why session 5 concluded raising `max_tokens` "does not help" — it does. Controlled pair, same
+question, same constraint, one variable: **700 → `{}`, 2048 → a cited answer.**
+
+### And then the fix did not work
+
+Deployed with the budget raised, the dbt question still refused — but the log (new, see below)
+said `finish_reason='stop'`, not `length`. It had not been truncated, so widening the budget
+could not possibly have helped it.
+
+A second probe, same prompt, same 2048-token budget, one variable:
+
+- **with** `response_format: json_object` → 490 characters of whitespace, or an object with no
+  `answer` key
+- **without** it → a complete, fully cited answer
+
+So there were two defects wearing one refusal reason, and each attempted fix had cured the other
+one's half. `_retry_kwargs` now picks the remedy by cause: `finish_reason='length'` widens the
+budget and holds the shape fixed; a normal stop with a vacuous payload drops the constraint and
+lets `extract_json` repair the natural output — which is the job that function already existed
+to do. Session 5's instinct was right and incomplete, not wrong.
+
+### The bug the fix introduced
+
+The first version guarded the retry on `response.cached`: replay must reproduce what was
+recorded, and a retry is a live call. Deployed, it answered the dbt question — and refused the
+*same question asked again*. The failing reply had been memoised, so the repeat was served from
+cache with `cached=True`, which was precisely the flag suppressing the retry. Answer once,
+refuse forever.
+
+The invariant was wrong. It is not "never retry a cache hit", it is "replay must not call out".
+`is_replaying()` says that, and outside replay a cached-but-unusable reply is retried normally.
+This was caught on the second question tested against the new revision, which is an argument for
+testing the boring second case.
+
+### A third defect, found in passing
+
+OpenRouter reports a failure *behind* it as HTTP **200** with an error object and no `choices`
+(`provider_unavailable` — "Upstream error from Nvidia: Service temporarily overloaded"). Because
+that is not a transport error it never reached the provider's retry loop, so a transient
+overload became a hard refusal with no backoff at all. It hit **6 of 13** probe calls to the free
+nemotron tier. Moving the check inside the loop was a four-line change that nobody would have
+thought to make without seeing the rate.
+
+### Three fields that already held the answer
+
+The most uncomfortable part of this. Every piece of information needed was already in the
+codebase, unread:
+
+- `LLMResponse.finish_reason` — captured off the wire since session 1, read by nothing. It says
+  `length`. That is the entire diagnosis, in a field on a dataclass, for six sessions.
+- `Answer.error` — captured, never logged or rendered. The service had **no logging at all**, so
+  characterising this cost three UI round-trips instead of one log line.
+- `cli.py`'s `propose --retry-multiplier` — the *same remedy*, written in session 2, under a
+  comment that names the failure exactly: *"a reasoning model can spend its entire token budget
+  on a preamble and stop with finish=length before emitting a character of JSON."* The
+  ground-truth path had this solved. The answer path never got it.
+
+The lesson is not "add more telemetry". It is that a field nothing reads is not observability,
+and a lesson learned in one module is not learned by the project.
+
+### A published number this restored
+
+Checking that the change did not move the published answer table turned up drift that predated
+it. Replaying from a cache built only from the committed bundle reproduced the headline metrics
+exactly but gave `unparseable` **0.000** for `qwen-coder` where the README publishes **0.017**:
+session 5's retry was firing on a cached entry, missing, and converting a parse failure into a
+`provider_error`. It had been wrong for two sessions because the previous replay check compared
+the six headline columns and not the whole row. The replay now reproduces every column.
+
+`truncated` is also split out from `unparseable` as a refusal reason — a budget problem and a
+prompting problem should not send an operator to the same place — but `ArmSummary.parse_failure`
+deliberately counts both, so renaming a reason underneath the published table cannot move it.

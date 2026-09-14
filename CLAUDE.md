@@ -40,15 +40,18 @@ path (**not** Pydantic — deviation reasoned in NOTES.md) · Gradio on **Google
       2 GiB / 2 vCPU / min 0 / max 2. HF Spaces stayed blocked at 402/PRO; no static rewrite.
       Cold HTTP 24.9 s, warm 0.21 s (Cloud Run) — kept separate from the local container's
       62 s start → first HTTP 200, which measures a different thing.
-      **Two defects open on the live revision, fixed in code and awaiting a redeploy:**
-      cold page loads 429 (revision runs `--concurrency 4`; must be `80`, with compute capped
-      by `demo.queue`), and generation refuses as `unparseable` (nemotron satisfies
-      `response_format` with `{}`; retry-without-constraint added). See PROJECT_SUMMARY.md §12.
+      **Both defects found in session 5 are closed on revision `production-rag-00005-cwn`:**
+      cold page loads return 67/67 HTTP 200 with zero 429 (`--concurrency 80`, compute capped
+      by `demo.queue`), and generation answers with resolved citations — 5 in 15.6 s (dbt),
+      2 in 21.1 s (Dagster) — while the unanswerable question still returns `Refused
+      (model)`. Root cause was that `max_tokens` is shared with a reasoning model's thinking
+      trace, plus a second shape where the model satisfies `response_format` with whitespace.
+      See PROJECT_SUMMARY.md §12.2.
       **`OPENROUTER_API_KEY` lives only in Secret Manager — never the image, repo or a CLI arg.**
 - [x] Graceful degradation to Ollama when the API is unavailable — and, after session 3,
       *disabled inside `answer-eval`*, because in a comparison between models it silently
       substitutes one for another. See NOTES.md.
-- [x] Ship gate passes (`/ship`) — 354 fast + 18 slow tests, ruff clean, CI green
+- [x] Ship gate passes (`/ship`) — 365 fast + 18 slow tests, ruff clean, CI green
 
 ## Project-specific notes
 

@@ -10,12 +10,25 @@
 
 **Live demo:** <https://production-rag-385330416945.asia-south1.run.app> (Google Cloud Run, `asia-south1`)
 
-> **Deployed, with two open defects on the live revision.** Retrieval on production is verified
-> and returns scores byte-identical to local. **Generation is currently broken there** (the
-> model satisfies `response_format` with an empty `{}`, so every request refuses as
-> `unparseable`), and **cold page loads return 429** on roughly half the Gradio asset bundle
-> because the revision runs `--concurrency 4`. Both are root-caused and fixed in this commit;
-> neither is live until the image is rebuilt and redeployed. See
+> **Deployed, and generation works.** Revision `production-rag-00005-cwn`, `--concurrency 80`.
+>
+> - **Retrieval** — scores byte-identical to local.
+> - **Page loads, including cold** — 67/67 requests HTTP 200, zero 429. Cold **39.2 s** (real
+>   scale-to-zero start), warm **0.065 s**. This was the `--concurrency 4` defect, fixed on
+>   `00002-dtq`.
+> - **Generation + citations** — verified on the live URL: the dbt `on_schema_change` question
+>   answers with **5 resolved citations in 15.6 s**, the Dagster partitioning question with
+>   **2 in 21.1 s**, and the unanswerable question returns **`Refused (model)`** with no
+>   citations. All three had refused as `unparseable` on the previous revision.
+>
+> Getting there took three wrong diagnoses, and the write-up keeps all of them: the defect was
+> that `max_tokens` is shared with a reasoning model's thinking trace, *plus* a second failure
+> where the model satisfies `response_format` with whitespace. Two causes, one refusal reason,
+> and each earlier fix left the other half live. [PROJECT_SUMMARY.md §12.2](PROJECT_SUMMARY.md)
+> is the full trace.
+>
+> Every generation number in this README comes from the **local** evaluation harness and
+> replays offline; none of it depends on the deployed service. See
 > [PROJECT_SUMMARY.md §12](PROJECT_SUMMARY.md) and [space/DEPLOY.md](space/DEPLOY.md).
 
 ---
