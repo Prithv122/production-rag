@@ -11,6 +11,7 @@ from production_rag.providers import (
     OpenRouterProvider,
     ProviderError,
     extract_json,
+    is_replaying,
 )
 
 FENCE = "`" * 3
@@ -209,16 +210,11 @@ def test_finish_reason_is_carried_off_the_wire(monkeypatch):
     assert OpenRouterProvider(api_key="k").complete("hi").finish_reason == "length"
 
 
-def test_a_truncated_response_is_not_memoised(tmp_path):
-    # Otherwise the answer path's budget retry answers a question once and
-    # refuses forever after: the truncated first reply sits in the cache under
-    # the original key, and `cached=True` is precisely the flag that stops
-    # `generate` retrying.
-    cut_off = LLMResponse(text="{partial", model="m", provider="fake", finish_reason="length")
+def test_is_replaying_is_true_only_for_an_offline_cache(tmp_path):
     cache = JsonCache(tmp_path)
-    provider = FakeProvider([cut_off, "second look"])
-    assert CachedProvider(provider, cache).complete("q").text == "{partial"
-    assert CachedProvider(provider, cache).complete("q").text == "second look"
+    assert not is_replaying(FakeProvider())
+    assert not is_replaying(CachedProvider(FakeProvider(), cache))
+    assert is_replaying(CachedProvider(FakeProvider(), cache, offline=True))
 
 
 def test_a_completed_response_is_still_memoised(tmp_path):
