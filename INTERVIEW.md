@@ -201,6 +201,48 @@ check want opposite things from the same event, and I'd built only the resilienc
 fixes are structural — `answer-eval` disables fallback, the summary reports a per-arm
 `fell_back` rate, and `cache audit` exits non-zero on any requested-vs-answered mismatch.
 
+### Q8. Something is broken in production and you can't reproduce it locally because you refuse to hold the credential. What do you actually do?
+
+_A:_ This happened here, and I got it wrong twice before I got it right.
+
+Generation refused with `unparseable` on every request to the deployed service. Retrieval was
+fine. The API key lives only in Secret Manager — it never enters the image, the repo, or my
+shell — so I couldn't just run the failing call and look at the response. Across two sessions I
+reasoned from the *shape of the refusal* instead and produced two confident diagnoses. The first
+was a symptom. The second was simply false.
+
+What I should have done immediately: stop trying to bring the secret to the code, and send the
+code to the secret. A one-off **Cloud Run job on the deployed image digest**, with the same
+`--set-secrets` binding the service uses, running a probe that prints the response envelope. The
+script goes in base64 in an env var, so there's no rebuild and it executes inside the exact image
+that's serving traffic. About twenty free-tier calls, and the key never moved.
+
+The answer was in the first field it printed: `finish_reason='length'`, with 504–857 of a
+700-token budget spent reasoning. `max_tokens` isn't an answer budget on a reasoning model — it's
+a completion budget shared with the thinking trace, and the trace goes first. The model was never
+reaching the JSON. Depending how far it got you'd see the reasoning trace echoed into `content`,
+JSON truncated mid-string, or a bare `{}` — which is what the first wrong diagnosis had latched
+onto.
+
+Two things I'd want to be judged on rather than the diagnosis itself.
+
+First, I deployed that fix and it *still failed* — and the logs I'd added in the same change said
+`finish_reason='stop'`, so it had never been truncated at all. There was a second, independent
+failure: under `response_format: json_object` this model can stop normally and return 490
+characters of whitespace, where the identical prompt unconstrained returns a fully cited answer.
+Two causes, one refusal reason, and each of my fixes had cured the other one's half. The retry
+now picks its remedy by cause.
+
+Second, and this is the part that actually bothers me: nothing here needed new instrumentation.
+`finish_reason` had been captured off the wire since the first session and read by nothing.
+`Answer.error` held the reason and was never logged — the service had no logging at all, which is
+why characterising this cost three UI round-trips instead of one log line. And the *same remedy*,
+an escalating token budget, had been sitting in the ground-truth path since session 2 under a
+comment describing this exact failure. The answer path never got it.
+
+So the lesson I'd carry to another team isn't "add telemetry". It's that a field nothing reads
+isn't observability, and a lesson learned in one module isn't learned by the codebase.
+
 ---
 
 ## 30-second pitch

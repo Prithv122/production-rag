@@ -277,15 +277,33 @@ its startup probe, and where Cloud Run applies a startup CPU boost.
 
 ## 10. Production verification — what was actually checked
 
-Verified against the **live public URL** (not the local container):
+Verified against the **live public URL** (not the local container). Revision
+`production-rag-00005-cwn` (image `:v5`, `--concurrency 80`) unless a row says otherwise:
 
 | Check | Result |
 |---|---|
 | Service returns HTTP 200 | ✅ |
 | Gradio UI renders **warm** | ✅ 22,789 chunks, `generation nemotron-super` (secret bound) |
 | Retrieval | ✅ scores **byte-identical to local** (2.9899 / 2.2363 / 1.9199 …) |
-| Gradio UI on a **cold** load | ❌ see §12.1 |
-| Generation + citations | ❌ see §12.2 |
+| Gradio UI on a **cold** load | ✅ **fixed on `00002-dtq`** — 67/67 requests HTTP 200, zero 429, page renders. §12.1 |
+| Cold start, measured | **39.2 s** server-side on `/` (39.9 s browser TTFB) |
+| Warm response | **0.065 s** |
+| Generation + citations | ✅ **fixed on `00005-cwn`** — 5 citations in 15.6 s (dbt), 2 in 21.1 s (Dagster). §12.2 |
+| Refusal path, live | ✅ the unanswerable question returns `Refused (model)`, 0 citations, 9.5 s |
+| Asking the same question twice | ✅ answers both times — broken on `00004-nq7`, see §12.2 |
+
+The cold figure is a **genuine** scale-to-zero cold start, not a first-request-after-deploy:
+the instance-start log line reads `Reason: AUTOSCALING`, and the triggering `/` request arrived
+~20 ms *before* it. Getting that measurement honestly required discovering the trap in the note
+below — the first two attempts at an "idle" window were not idle.
+
+> **An open Gradio tab prevents scale-to-zero.** The page holds a `/queue/data` SSE stream, and
+> Cloud Run counts an open streaming request as an active request, so the instance never
+> retires while any browser tab has the demo open. Two 17-minute "idle" windows measured
+> 1.25 s and looked like cold starts that had somehow got fast; they were the same instance,
+> still up, still billing. This is a **cost** fact as much as a measurement one:
+> `--min-instances 0` does not mean zero cost while someone has the demo open in a background
+> tab.
 
 ---
 
@@ -311,33 +329,113 @@ Verified against the **live public URL** (not the local container):
 
 ## 12. Open defects and limitations
 
-### 12.1 Cold page loads return 429 on static assets — **fix committed, needs redeploy**
+### 12.1 Cold page loads return 429 on static assets — **FIXED and verified live**
 
-The deployed revision runs `--concurrency 4`. A Gradio page fires **~65 parallel static-asset
-requests** on load, so while only one instance is up during a cold start, roughly half the
-bundle returns **HTTP 429** and the page hangs on "Loading…" forever. Warm loads are fine.
+Revision `production-rag-00001-r47` ran `--concurrency 4`. A Gradio page fires **~65 parallel
+static-asset requests** on load, so while only one instance is up during a cold start, roughly
+half the bundle returned **HTTP 429** and the page hung on "Loading…" forever. Warm loads were
+fine, which is exactly why this survived the first deployment's verification.
 
-This was caused by a configuration recommendation of mine that conflated **HTTP concurrency**
-with **compute concurrency**. Fixed by widening the edge (`--concurrency 80`) and narrowing
-compute in-process (`demo.queue(default_concurrency_limit=2)`), which is the correct layer.
+Caused by a configuration recommendation that conflated **HTTP concurrency** with **compute
+concurrency**. Fixed by widening the edge (`--concurrency 80`) and narrowing compute in-process
+(`demo.queue(default_concurrency_limit=2)`), which is the correct layer for each.
 
-### 12.2 Generation returns `Refused (unparseable)` — **fix committed, needs redeploy**
+**Verified on revision `production-rag-00002-dtq`** against a genuine cold start (instance
+start logged as `Reason: AUTOSCALING`): **67 requests, 67 × HTTP 200, zero 429**, peak 39
+requests in flight, page rendered. Cold 39.2 s server-side, warm 0.065 s.
 
-Every generation request against the deployed revision refused with reason `unparseable`
-(observed at 2.2 s, 4.5 s, 11.8 s). Root cause, reproduced locally: under
-`response_format: json_object`, `nemotron-3-super` can satisfy the constraint with the **empty
-object `{}`** — it spends its budget reasoning and emits nothing. That parses cleanly and then
-`payload["answer"]` raises `KeyError`. **Raising `max_tokens` does not help**, because nothing is
-being truncated (verified at 700 and 2100). It is intermittent and prompt-specific — 2 of 3
-sampled questions answered normally at the same settings.
+### 12.2 Generation returned `Refused (unparseable)` — **CLOSED on `00005-cwn`**
 
-Fixed by detecting a vacuous-but-valid payload and retrying **once with the format constraint
-dropped**, letting `extract_json` repair the model's natural output. Validated against the exact
-question that previously returned `{}`: it now answers with three valid citations.
+Live verification on the current revision, all three questions that failed on `00002-dtq`:
 
-> **⚠︎ This corrects an earlier "Citations ✅ / Generation ✅" claim about the deployed service.**
-> Citations and refusal are verified on the *local container* and in the eval harness; on the
-> *deployed revision* generation is currently broken.
+| Question | Result | Latency |
+|---|---|---|
+| `what does on_schema_change do in an incremental model?` | answered, **5 resolved citations** | 15.6 s |
+| `how do I partition an asset by date in dagster?` | answered, **2 resolved citations** | 21.1 s |
+| `how do I configure the quantum flux capacitor in dbt?` | **`Refused (model)`**, 0 citations | 9.5 s |
+
+#### How it was diagnosed, after two hypotheses that were both wrong
+
+The blocker was never the bug — it was that the evidence needed an API key, and the standing
+rule keeps the key out of a local agent session. The key-clean way to get a real response is a
+one-off **Cloud Run job on the deployed image digest** with `--set-secrets`: it runs the probe
+beside the secret instead of bringing the secret to the developer. Three probes, ~20 free-tier
+calls, no rebuild — the script is passed base64-encoded in an env var and run with
+`--command python --args "^@^-c@exec(...)"`, so it executes inside *the exact image the service
+runs*. **This is the technique worth keeping from the whole episode.**
+
+#### Root cause: two defects wearing one refusal reason
+
+**1. `max_tokens` is not an answer budget on a reasoning model — it is shared with the thinking
+trace, and the trace goes first.** Measured: `nemotron-3-super` spent **504–857 completion
+tokens reasoning** before writing a character of JSON. At 700 the budget is gone mid-thought and
+the reply returns `finish_reason='length'` in three shapes — the reasoning trace echoed into
+`content`, JSON truncated mid-string, or a bare `{}`. A controlled pair on one question, one
+constraint, one variable: **700 tokens → `{}`; 2048 tokens → a cited answer.**
+
+**2. Under `response_format: json_object` the model can stop normally and say nothing.** Same
+question, same 2048-token budget, `finish_reason='stop'`: constrained it returns **490
+characters of whitespace**, or an object with no `answer` key; unconstrained it returns a
+complete, fully cited answer.
+
+So the remedy depends on the cause, and each earlier fix treated one cause as the whole thing:
+
+| Cause | Signal | Remedy |
+|---|---|---|
+| ran out of budget | `finish_reason='length'` | widen the budget, hold the shape fixed |
+| stopped and said nothing | `finish_reason='stop'` + vacuous payload | drop the format constraint |
+
+**This corrects a claim made in session 5 and repeated in session 6** — that raising `max_tokens`
+"does not help". It does; that was measured against the other shape.
+
+**A third defect, independent and also live:** an upstream failure arrives from OpenRouter as
+HTTP **200** carrying an error object and no `choices` (`provider_unavailable`, "Upstream error
+from Nvidia: Service temporarily overloaded"). Because that is not a transport error it never
+reached the provider's existing backoff, so a transient overload became a hard refusal without a
+single retry. Measured on **6 of 13** probe calls to the free nemotron tier — not a rate worth
+failing at. This is the `provider_error` row in the session-6 table.
+
+**Three things the project already had, and did not use.** `LLMResponse.finish_reason` held the
+answer and nothing read it. `Answer.error` held the reason and nothing logged or rendered it —
+the service had **no logging at all**, which is why characterising this cost three UI round-trips
+instead of one log line. And `propose` has carried this exact remedy since session 2, in a
+comment naming the failure: *"a reasoning model can spend its entire token budget on a preamble
+and stop with finish=length before emitting a character of JSON."* The ground-truth path got it;
+the answer path never did.
+
+#### A second-order bug the fix introduced, caught by verifying rather than by assuming
+
+The first fix guarded the retry on `response.cached`, reasoning that replay must reproduce what
+was recorded. Deployed as `00004-nq7` it answered the dbt question — and then **refused the same
+question asked a second time**. The failing reply had been memoised, so the repeat was served
+from cache with `cached=True`, which was exactly the flag suppressing the retry. A question that
+failed once refused forever after.
+
+The invariant was wrong, not the code: it is not *"never retry a cache hit"*, it is *"replay must
+not call out"*. `is_replaying()` says that directly. Outside replay a cached-but-unusable reply
+is retried, and the retry's own result is cached under its own key, so a repeat costs one call
+rather than two — or a permanent refusal.
+
+#### A published number this restored
+
+`answer-eval --replay` against a cache built only from the committed bundle now reproduces the
+README's table exactly, **including** the `unparseable` column at 0.017 / 0.017 / 0.050. The
+pre-fix code produced **0.000** for `qwen-coder`: session 5's retry fired on a cached entry,
+missed, and turned a parse failure into a `provider_error`. That drift sat in the repository for
+two sessions, because the earlier replay check compared the headline metrics and not the whole
+row.
+
+#### Superseded hypotheses, kept
+
+1. **`{}` as a vacuous satisfaction of `response_format`** (session 5). Real, and a *symptom* —
+   budget exhaustion that got as far as opening the object.
+2. **`content: null` with the text in OpenRouter's `reasoning` field** (session 6). **Wrong.**
+   The probe shows `content` populated on every response. What is true is that a reply cut off
+   mid-reasoning has `content` and `reasoning` *identical*, which looks like the same thing from
+   the outside and is not.
+
+> **⚠︎ This supersedes both the "Generation ✅" claim of session 4 — true of the local container,
+> not of the deployed service — and the "STILL OPEN" status of session 6.**
 
 ### 12.3 Hosted model comparison — external, unresolved
 
@@ -355,10 +453,20 @@ strong claims; `grounded` measures citation targeting, not correctness.
 
 ## 13. Status
 
-**Shipped and deployed.** Code complete, **354 fast tests + 18 slow passing**, ruff clean, CI
+**Shipped and deployed.** Code complete, **365 fast tests + 18 slow passing**, ruff clean, CI
 green, evaluation audited and replayable, secrets clean, public URL live.
 
-Two defects are open on the deployed revision (§12.1, §12.2). **Both fixes are committed and
-tested; neither is live until the image is rebuilt and redeployed** —
-`docker build -f space/Dockerfile -t ... .` then `gcloud run deploy` per
-[`space/DEPLOY.md`](space/DEPLOY.md), adding `--concurrency 80`.
+Revision **`production-rag-00005-cwn`** (image `:v5`, `--concurrency 80`) closes both
+defects carried in from session 5:
+
+- **§12.1 cold-load 429s — fixed and verified** on a genuine cold start: 67/67
+  requests HTTP 200, zero 429, cold 39.2 s, warm 0.065 s.
+- **§12.2 generation — fixed and verified on the live URL**: two questions answer
+  with resolved citations, the unanswerable one refuses as `model`, and asking the same
+  question twice answers twice. It took three deployed revisions and three hypotheses,
+  two of which were wrong.
+
+**The demo is therefore complete in production.** The README still sources every published
+number from the local evaluation harness rather than from the deployed service, because that
+is the half that replays offline with no key — the deployment demonstrates the system, it
+does not substantiate the numbers.
