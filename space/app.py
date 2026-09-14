@@ -30,15 +30,31 @@ demonstrating.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 import gradio as gr
 from huggingface_hub import snapshot_download
 
-from production_rag.generate import generate, link_citations, markdown_sources
+from production_rag.generate import (
+    DEFAULT_ANSWER_TOKENS,
+    generate,
+    link_citations,
+    markdown_sources,
+)
 from production_rag.pipeline import Retriever
-from production_rag.providers import MODEL_ARMS, build_provider
+from production_rag.providers import MODEL_ARMS, answer_budget, build_provider
+
+# The service ran for two revisions with no logging at all. `Answer.error` and
+# `LLMResponse.finish_reason` both already carried the reason generation was
+# failing in production, and nothing read either -- so diagnosing a refusal cost
+# three UI round-trips and a Cloud Run job to learn what one log line says.
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger("production_rag.demo")
 
 INDEX_REPO = os.environ.get("INDEX_REPO", "Prithv122/production-rag-index")
 STRATEGY = "heading"
@@ -142,6 +158,20 @@ def run(question: str, arm: str, k: int, rerank: bool, answer_it: bool):
         RETRIEVER.chunks,
         PROVIDER,
         top_score=result.ranked[0][1] if result.ranked else None,
+        # Asked of the arm, not hard-coded: on a reasoning model `max_tokens` is
+        # shared with the thinking trace, and 700 is spent before the answer
+        # starts. That is what broke generation on the first two revisions.
+        max_tokens=answer_budget(MODEL_ARM, DEFAULT_ANSWER_TOKENS),
+    )
+    logger.info(
+        "q=%r arm=%s refused=%s reason=%s citations=%d latency=%.1fs error=%s",
+        question[:80],
+        arm,
+        answer.refused,
+        answer.refusal_reason or "-",
+        len(answer.citations),
+        answer.latency_s,
+        answer.error or "-",
     )
     body = link_citations(answer)
     if answer.refused:

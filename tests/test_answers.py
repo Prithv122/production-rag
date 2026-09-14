@@ -112,6 +112,21 @@ def test_unparseable_and_provider_errors_are_counted_apart():
     assert s.provider_error == pytest.approx(0.25)
 
 
+def test_a_truncated_row_counts_as_a_parse_failure():
+    # `truncated` was split out of `unparseable` because the remedy differs.
+    # The published table's column must not move when a refusal reason is
+    # renamed underneath it: both mean "the model spoke and nothing usable came
+    # back". Counting only `unparseable` here silently changed llama3.2:3b's
+    # published 0.050 to 0.017 on replay.
+    rows = [
+        row(refused=True, refusal_reason="truncated"),
+        row(refused=True, refusal_reason="unparseable"),
+        row(),
+        row(),
+    ]
+    assert summarise(rows, arm="a", model="m").parse_failure == pytest.approx(0.5)
+
+
 def test_summarise_ignores_rows_from_other_arms():
     rows = [row(arm="a", cited_gold=True), row(arm="b", cited_gold=False)]
     assert summarise(rows, arm="a", model="m").n == 1
