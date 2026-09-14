@@ -314,18 +314,22 @@ def test_a_truncated_response_is_retried_with_a_wider_budget(chunks, ranked):
     assert not answer.refused
     assert answer.cited_chunk_ids == [ranked[0]]
     assert [k["max_tokens"] for k in provider.kwargs] == [700, 2100]
-    # The budget is the only thing the retry changes. Dropping the format
-    # constraint as well would confound the two, and the constraint is not what
-    # the measurement indicts.
+    # Truncation is a budget failure, not a shape failure, so the constraint is
+    # held fixed. Changing both would confound the two remedies.
     assert [k["json_object"] for k in provider.kwargs] == [True, True]
 
 
-def test_an_empty_json_object_is_the_same_defect_and_retries(chunks, ranked):
-    # `{}` is what comes back when the model spent its budget reasoning but got
-    # far enough to open the object. Same cause, same remedy.
+def test_a_vacuous_reply_that_stopped_normally_drops_the_constraint_instead(chunks, ranked):
+    # Measured on nemotron-3-super at 2048 tokens, finish_reason='stop': under
+    # `response_format` the same prompt returns whitespace or an object with no
+    # `answer` key, and unconstrained it returns a fully cited answer. Widening
+    # the budget here would be treating a shape problem as a budget problem --
+    # which is what the live service did for a whole revision.
     provider = FakeProvider(["{}", payload("recovered [1].")])
-    answer = generate("q", ranked, chunks, provider)
+    answer = generate("q", ranked, chunks, provider, max_tokens=700, retry_multiplier=3)
     assert not answer.refused and len(provider.prompts) == 2
+    assert [k["json_object"] for k in provider.kwargs] == [True, False]
+    assert [k["max_tokens"] for k in provider.kwargs] == [700, 700]
 
 
 def test_a_payload_with_an_empty_answer_string_also_retries(chunks, ranked):
@@ -382,6 +386,7 @@ def test_truncation_is_retried_even_without_the_format_constraint(chunks, ranked
     provider = FakeProvider([_truncated("half an ans"), payload("recovered [1].")])
     answer = generate("q", ranked, chunks, provider, json_object=False)
     assert not answer.refused and len(provider.prompts) == 2
+    assert [k["json_object"] for k in provider.kwargs] == [False, False]
 
 
 def test_an_empty_payload_is_not_chased_when_json_was_never_requested(chunks, ranked):

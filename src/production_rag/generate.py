@@ -300,18 +300,47 @@ def _is_empty_payload(text: str) -> bool:
     return isinstance(payload, dict) and not str(payload.get("answer", "")).strip()
 
 
-def _should_widen(response: LLMResponse, *, json_object: bool) -> bool:
-    """Did this response run out of completion budget rather than answer?
+def _retry_kwargs(
+    response: LLMResponse,
+    *,
+    json_object: bool,
+    max_tokens: int,
+    retry_multiplier: int,
+) -> dict[str, Any] | None:
+    """What to change on a second attempt, or `None` if the reply is usable.
 
-    Two signals, because the provider reports the same event two ways. The
-    honest one is `finish_reason='length'`. The other is a payload that parses
-    and says nothing -- `{}` or `{"sufficient": true}` -- which is what comes
-    back when the model spent its budget reasoning but got far enough to open
-    the object. Both mean the same thing and both are fixed by the same retry.
+    Two causes, two remedies, each matched to the measurement that indicts it.
+    Treating them as one defect is what cost this project two sessions: session
+    5 saw the empty object and dropped the format constraint, session 7 saw the
+    truncation and widened the budget, and each fix left the other half live.
+
+    **Ran out of budget** (`finish_reason='length'`). On a reasoning model
+    `max_tokens` is shared with the thinking trace and the trace goes first --
+    nemotron-3-super was measured spending 504-857 completion tokens reasoning
+    before writing a character of JSON. The shape was never the problem, so the
+    retry widens the budget and holds everything else fixed. Controlled pair on
+    one question at one constraint: 700 tokens returns `{}`, 2048 returns a
+    cited answer.
+
+    **Stopped normally and said nothing.** Same model, same prompt, 2048 tokens,
+    `finish_reason='stop'`: under `response_format: json_object` it returns 490
+    characters of whitespace, or an object with no `answer` key; with the
+    constraint dropped it returns a complete, fully cited answer. Here the shape
+    *is* the problem, so the retry drops the constraint and lets
+    :func:`extract_json` repair the model's natural output -- which is the job
+    that function already existed to do.
+
+    `cached` short-circuits both. A cached response is the recorded outcome, and
+    retrying it would quietly rewrite published numbers: three of the 180
+    committed answer entries would otherwise trigger this.
     """
+    if response.cached:
+        return None
     if str(response.finish_reason) == "length":
-        return True
-    return json_object and _is_empty_payload(response.text)
+        return {"max_tokens": max_tokens * retry_multiplier, "json_object": json_object}
+    if json_object and _is_empty_payload(response.text):
+        return {"max_tokens": max_tokens, "json_object": False}
+    return None
 
 
 def _split_marker(group: str) -> list[int]:
@@ -438,41 +467,28 @@ def generate(
             max_tokens=max_tokens,
             json_object=json_object,
         )
-        # `max_tokens` is not an answer budget on a reasoning model -- it is
-        # shared with the thinking trace, and the trace goes first. Measured
-        # against the deployed image, `nemotron-3-super` spends 504-857
-        # completion tokens reasoning before it writes a character of JSON, so a
-        # 700-token budget is gone mid-thought and the call comes back with
-        # `finish_reason='length'` in one of three shapes: the reasoning trace
-        # echoed into `content`, real JSON truncated mid-string, or -- if the
-        # model got as far as opening the object -- a bare `{}`. All three are
-        # the same defect. So the retry widens the budget and changes nothing
-        # else, because the budget is the variable the measurement indicts.
-        #
-        # This is the same remedy `propose` has had since session 2, in a
-        # comment that describes this exact failure ("a reasoning model can
-        # spend its entire token budget on a preamble and stop with
-        # finish=length before emitting a character of JSON"). The ground-truth
-        # path got it; the answer path did not.
-        #
-        # `cached` is the guard that keeps replay honest: a cached response *is*
-        # the recorded outcome, and retrying it would quietly rewrite published
-        # numbers -- three of the 180 committed answer entries would trigger
-        # this branch.
-        if not response.cached and _should_widen(response, json_object=json_object):
+        # The reply is not always usable, and it fails two different ways that
+        # need two different remedies. See `_retry_kwargs`, which carries the
+        # measurements. Exactly one retry: a loop here would turn a bad model
+        # day into a quota outage.
+        retry = _retry_kwargs(
+            response,
+            json_object=json_object,
+            max_tokens=max_tokens,
+            retry_multiplier=retry_multiplier,
+        )
+        if retry is not None:
             logger.warning(
-                "widening budget %d -> %d after finish_reason=%r: %s",
-                max_tokens,
-                max_tokens * retry_multiplier,
+                "retrying after finish_reason=%r with %s: %s",
                 response.finish_reason,
+                retry,
                 question[:80],
             )
             response = provider.complete(
                 prompt,
                 system=ANSWER_SYSTEM,
                 temperature=0.0,
-                max_tokens=max_tokens * retry_multiplier,
-                json_object=json_object,
+                **retry,
             )
     except ProviderError as exc:
         logger.warning("refusing (provider_error) for %r: %s", question[:80], str(exc)[:200])
