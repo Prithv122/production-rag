@@ -2,7 +2,7 @@
 
 Form: **action → technical specifics → measured outcome.** Numbers or it doesn't go on the resume.
 
-> Retrieval and generation bullets are final.
+> Retrieval, generation and deployment bullets are final.
 
 ---
 
@@ -57,6 +57,20 @@ Form: **action → technical specifics → measured outcome.** Numbers or it doe
   reframed the result as the arm *ordering* rather than the third decimal, and caught that a
   partially-verified question set was an ordered prefix rather than a random sample.
 
+- Deployed the demo to Google Cloud Run as a 2.78 GB CPU-only image with the 61 MB index and
+  encoder baked in at build time, after measuring that fetching the index at boot took **256 s**
+  against Cloud Run's **240 s** startup probe — a coin flip on whether the revision ever went
+  healthy; baked, cold start is **39.2 s** and warm **0.065 s**, with the API key bound from
+  Secret Manager and never present in the image, the repository or a shell.
+
+- Diagnosed a production-only generation failure without ever holding the credential, by running
+  probe scripts as **one-off Cloud Run jobs against the deployed image digest** with the secret
+  bound as the service binds it: found that `max_tokens` is shared with a reasoning model's
+  thinking trace (**504-857 of a 700-token budget** spent before any JSON), plus a second failure
+  where the same prompt under `response_format` returned 490 characters of whitespace and
+  unconstrained returned a fully cited answer — two causes behind one refusal reason, which is
+  why two previous fixes each cured only half. Verified live: 5 resolved citations in 15.6 s.
+
 ## Which roles this supports
 
 - [ ] Data Scientist / ML
@@ -74,7 +88,9 @@ query rewriting · retrieval evaluation (recall@k, nDCG, MRR, hit-rate) · groun
 chunking strategies · scipy sparse · numpy · OpenRouter · Ollama · provider abstraction ·
 fallback and graceful degradation · response caching and offline replay · citation grounding ·
 refusal/abstention evaluation · prompt engineering (measured) · bootstrap confidence intervals ·
-experiment provenance auditing · Gradio · Hugging Face Hub · pytest · ruff · uv · CI
+experiment provenance auditing · Gradio · Hugging Face Hub · Docker · Google Cloud Run ·
+Secret Manager · Artifact Registry · structured logging · production debugging ·
+pytest · ruff · uv · CI
 
 ---
 
