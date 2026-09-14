@@ -421,7 +421,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
 # ask -- retrieve, then answer with citations
 # ---------------------------------------------------------------------------
 def cmd_ask(args: argparse.Namespace) -> int:
-    from .generate import format_answer, generate
+    from .generate import DEFAULT_ANSWER_TOKENS, format_answer, generate
+    from .providers import answer_budget
 
     spec = ARMS[args.arm]
     provider = _provider(args)
@@ -440,6 +441,9 @@ def cmd_ask(args: argparse.Namespace) -> int:
         rewriter=provider if spec.needs_llm else None,
     )
     top_score = result.ranked[0][1] if result.ranked else None
+    # The budget is asked of the arm rather than hard-coded, because on a
+    # reasoning model `max_tokens` is shared with the thinking trace. See
+    # `providers.answer_budget`.
     answer = generate(
         args.question,
         result.chunk_ids,
@@ -448,6 +452,7 @@ def cmd_ask(args: argparse.Namespace) -> int:
         top_score=top_score,
         min_top_score=args.min_top_score,
         sentences=args.sentences,
+        max_tokens=answer_budget(args.model_arm, DEFAULT_ANSWER_TOKENS),
     )
     print(format_answer(answer))
     if args.show_context:

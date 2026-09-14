@@ -189,16 +189,30 @@ class OpenRouterProvider:
                     },
                     self.timeout,
                 )
-                break
             except ProviderError:
                 if attempt == self.max_retries:
                     raise
                 # Free-tier models rate-limit rather than fail permanently, so a
                 # short backoff converts most errors into a slower success.
                 time.sleep(2.0 * (attempt + 1))
+                continue
 
-        if "error" in data and not data.get("choices"):
-            raise ProviderError(f"openrouter error: {str(data['error'])[:300]}")
+            # An upstream failure arrives as HTTP *200* with an error object and
+            # no choices -- OpenRouter succeeded at proxying, the model behind it
+            # did not. That is not a transport error, so it never reached the
+            # retry above and a transient overload became a hard refusal. It is
+            # not hypothetical: a probe against the deployed image measured
+            # `{"code": 502, "error_type": "provider_unavailable", "message":
+            # "Upstream error from Nvidia: Service temporarily overloaded"}` on
+            # 6 of 13 calls to the free nemotron tier. Retrying it is the whole
+            # point of having a backoff.
+            if "error" in data and not data.get("choices"):
+                if attempt == self.max_retries:
+                    raise ProviderError(f"openrouter error: {str(data['error'])[:300]}")
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            break
+
         try:
             choice = data["choices"][0]
             text = choice["message"]["content"] or ""
@@ -369,7 +383,20 @@ class CachedProvider:
             max_tokens=max_tokens,
             json_object=json_object,
         )
-        self.cache.put(key, response.as_dict())
+        # A response that stopped at `finish_reason='length'` is not a
+        # completion, so it is not memoised. Without this the answer path's
+        # budget retry has a nasty second-order bug: the *first* ask widens the
+        # budget and succeeds, but the truncated first response is now cached
+        # under the original key, so asking the same question again serves the
+        # failure from cache with `cached=True` -- which is exactly the flag
+        # that tells `generate` it must not retry. The question would answer
+        # once and refuse forever after.
+        #
+        # This is a write rule only. Truncated entries already in a committed
+        # bundle are still read, so replay is untouched: the published answer
+        # table includes two of them and reproduces unchanged.
+        if str(response.finish_reason) != "length":
+            self.cache.put(key, response.as_dict())
         return response
 
 
@@ -453,17 +480,29 @@ CACHE_DIR = Path(".cache/llm")
 #: The comparison arms. ``structured`` records whether the model honours
 #: ``response_format`` -- verified against the live OpenRouter catalogue in
 #: session 1, not copied from a blog post.
+#:
+#: ``answer_tokens`` is the completion budget the *answer* path needs on that
+#: arm, and it exists because ``max_tokens`` is not an answer budget: on a
+#: reasoning model it is shared with the thinking trace. Measured on the
+#: deployed image, ``nemotron-3-super`` spends 504-857 completion tokens
+#: reasoning before it writes a character of JSON, so the 700 that is ample for
+#: a 7B instruct model is exhausted mid-thought. Arms without the key keep
+#: :func:`generate`'s default, which is what the published answer table ran at
+#: and what its committed cache is keyed on.
 MODEL_ARMS: dict[str, dict[str, Any]] = {
     "nemotron-super": {
         "provider": "openrouter",
         "model": "nvidia/nemotron-3-super-120b-a12b:free",
         "structured": True,
-        "note": "primary; 262k context, honours response_format",
+        "answer_tokens": 2048,
+        "note": "primary; 262k context, honours response_format, and reasons at "
+        "length before answering -- see answer_tokens",
     },
     "nemotron-ultra": {
         "provider": "openrouter",
         "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
         "structured": False,
+        "answer_tokens": 2048,
         "note": "NEVER RUN. The id here was wrong until session 3 (missing the -a55b "
         "suffix), so every call to this arm was a 400 that the fallback chain swallowed. "
         "Corrected against the live model list; still unrun, because the free tier is "
@@ -501,6 +540,19 @@ MODEL_ARMS: dict[str, dict[str, Any]] = {
         "note": "different family, less than half the parameters -- isolates scale",
     },
 }
+
+
+def answer_budget(arm: str, default: int) -> int:
+    """The completion budget the answer path should use on `arm`.
+
+    Deliberately a floor rather than an override: it raises the budget for a
+    reasoning model and leaves every other arm exactly where it was. That is
+    not politeness, it is a replay constraint -- :class:`CachedProvider` keys on
+    ``max_tokens``, so silently raising it for the local arms would invalidate
+    all 180 committed entries the published answer table replays from.
+    """
+    return max(default, int(MODEL_ARMS.get(arm, {}).get("answer_tokens") or 0))
+
 
 #: Arms that run with no API key and no egress. The answer eval defaults to
 #: these, because an evaluation nobody else can re-run is not an evaluation.

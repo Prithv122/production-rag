@@ -197,6 +197,15 @@ class ArmSummary:
     citation_validity: float
     uncited_rate: float
     parse_failure: float
+    """Share of rows where the model's output could not be turned into an answer.
+
+    Counts `unparseable` *and* `truncated`. They are separate refusal reasons
+    because the remedy differs -- a truncated response ran out of completion
+    budget and a malformed one did not -- but from the table's point of view
+    both are the same event: the model spoke and nothing usable came back.
+    Splitting them in the metric would have quietly moved a published number
+    when `truncated` was introduced."""
+
     provider_error: float
     fell_back: float
     """Share of this arm's rows actually answered by a *different* model.
@@ -238,7 +247,9 @@ def summarise(rows: Sequence[AnswerRow], *, arm: str, model: str) -> ArmSummary:
         grounded=rate(sum(1 for r in answered if r.cited_gold), len(answered)),
         citation_validity=rate(valid, markers),
         uncited_rate=rate(sum(1 for r in answered if r.uncited), len(answered)),
-        parse_failure=rate(sum(1 for r in rows if r.refusal_reason == "unparseable"), len(rows)),
+        parse_failure=rate(
+            sum(1 for r in rows if r.refusal_reason in ("unparseable", "truncated")), len(rows)
+        ),
         provider_error=rate(
             sum(1 for r in rows if r.refusal_reason == "provider_error"), len(rows)
         ),

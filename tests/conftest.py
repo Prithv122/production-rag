@@ -111,11 +111,21 @@ class FakeReranker:
 
 
 class FakeProvider:
-    """Returns scripted text. Optionally fails, to exercise the fallback path."""
+    """Returns scripted text. Optionally fails, to exercise the fallback path.
+
+    A scripted response may be a plain string or a whole ``LLMResponse``. The
+    second form exists because two fields of the envelope drive real control
+    flow -- ``finish_reason`` decides whether the answer path widens its token
+    budget, and ``cached`` decides whether it is allowed to retry at all -- and
+    a fake that can only vary the body cannot test either.
+
+    ``kwargs`` records the arguments of every call, so a test can assert *what*
+    the retry changed rather than only that a retry happened.
+    """
 
     def __init__(
         self,
-        responses: list[str] | None = None,
+        responses: list | None = None,
         *,
         name: str = "fake",
         model: str = "fake-model",
@@ -126,6 +136,7 @@ class FakeProvider:
         self._model = model
         self.fail = fail
         self.prompts: list[str] = []
+        self.kwargs: list[dict] = []
 
     @property
     def name(self) -> str:
@@ -139,10 +150,13 @@ class FakeProvider:
         from production_rag.providers import LLMResponse, ProviderError
 
         self.prompts.append(prompt)
+        self.kwargs.append(dict(kwargs))
         if self.fail:
             raise ProviderError(f"{self._name} is down")
-        text = self._responses.pop(0) if self._responses else "{}"
-        return LLMResponse(text=text, model=self._model, provider=self._name)
+        scripted = self._responses.pop(0) if self._responses else "{}"
+        if isinstance(scripted, LLMResponse):
+            return scripted
+        return LLMResponse(text=scripted, model=self._model, provider=self._name)
 
 
 @pytest.fixture

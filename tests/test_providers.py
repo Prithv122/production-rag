@@ -146,3 +146,84 @@ def test_missing_key_is_a_provider_error_not_a_crash(monkeypatch):
 def test_response_round_trips_through_the_cache_shape():
     response = LLMResponse(text="t", model="m", provider="p", prompt_tokens=3)
     assert LLMResponse.from_dict(response.as_dict(), cached=True).prompt_tokens == 3
+
+
+# ---------------------------------------------------------------------------
+# the upstream error that arrives as HTTP 200
+#
+# OpenRouter reports a failure *behind* it as a 200 carrying an error object and
+# no choices: proxying worked, the model did not. Because that is not a
+# transport error it never reached the backoff, so a transient overload became a
+# hard refusal. A probe against the deployed image measured it on 6 of 13 calls
+# to the free nemotron tier, which is not a rate worth failing at.
+# ---------------------------------------------------------------------------
+OVERLOADED = {
+    "id": "gen-x",
+    "error": {
+        "message": "Upstream error from Nvidia: Service temporarily overloaded",
+        "code": 502,
+        "metadata": {"error_type": "provider_unavailable"},
+    },
+}
+ANSWERED = {
+    "choices": [{"message": {"content": "recovered"}, "finish_reason": "stop"}],
+    "model": "m",
+    "usage": {"prompt_tokens": 1, "completion_tokens": 2},
+}
+
+
+def _scripted(monkeypatch, responses):
+    calls: list[dict] = []
+
+    def fake_post(url, payload, headers, timeout):
+        calls.append(payload)
+        return responses[min(len(calls) - 1, len(responses) - 1)]
+
+    monkeypatch.setattr("production_rag.providers._post_json", fake_post)
+    monkeypatch.setattr("production_rag.providers.time.sleep", lambda _: None)
+    return calls
+
+
+def test_a_transient_upstream_error_is_retried_not_refused(monkeypatch):
+    calls = _scripted(monkeypatch, [OVERLOADED, ANSWERED])
+    response = OpenRouterProvider(api_key="k").complete("hi")
+    assert response.text == "recovered"
+    assert len(calls) == 2
+
+
+def test_an_upstream_error_that_never_clears_still_raises(monkeypatch):
+    calls = _scripted(monkeypatch, [OVERLOADED])
+    with pytest.raises(ProviderError, match="provider_unavailable"):
+        OpenRouterProvider(api_key="k", max_retries=2).complete("hi")
+    assert len(calls) == 3, "all attempts used before giving up"
+
+
+def test_finish_reason_is_carried_off_the_wire(monkeypatch):
+    # Nothing read this field for six sessions while it held the answer to why
+    # production generation was failing. It is part of the contract now.
+    truncated = {
+        "choices": [{"message": {"content": "{partial"}, "finish_reason": "length"}],
+        "model": "m",
+    }
+    _scripted(monkeypatch, [truncated])
+    assert OpenRouterProvider(api_key="k").complete("hi").finish_reason == "length"
+
+
+def test_a_truncated_response_is_not_memoised(tmp_path):
+    # Otherwise the answer path's budget retry answers a question once and
+    # refuses forever after: the truncated first reply sits in the cache under
+    # the original key, and `cached=True` is precisely the flag that stops
+    # `generate` retrying.
+    cut_off = LLMResponse(text="{partial", model="m", provider="fake", finish_reason="length")
+    cache = JsonCache(tmp_path)
+    provider = FakeProvider([cut_off, "second look"])
+    assert CachedProvider(provider, cache).complete("q").text == "{partial"
+    assert CachedProvider(provider, cache).complete("q").text == "second look"
+
+
+def test_a_completed_response_is_still_memoised(tmp_path):
+    done = LLMResponse(text="done", model="m", provider="fake", finish_reason="stop")
+    cache = JsonCache(tmp_path)
+    CachedProvider(FakeProvider([done]), cache).complete("q")
+    replayed = CachedProvider(FakeProvider(fail=True), cache, offline=True).complete("q")
+    assert replayed.text == "done" and replayed.cached

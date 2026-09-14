@@ -27,6 +27,7 @@ from production_rag.generate import (
     generate,
     parse_citations,
 )
+from production_rag.providers import LLMResponse
 
 
 def payload(answer: str, *, sufficient: bool = True) -> str:
@@ -285,18 +286,46 @@ def test_markdown_sources_is_empty_for_an_uncited_answer(chunks, ranked):
 
 
 # ---------------------------------------------------------------------------
-# the empty-payload retry
+# the budget retry
+#
+# What these cover is one defect wearing three costumes. `max_tokens` on a
+# reasoning model is not an answer budget -- it is shared with the thinking
+# trace, and the trace goes first. Measured against the deployed image,
+# nemotron-3-super spent 504-857 completion tokens reasoning, so a 700-token
+# budget was gone before the JSON started and came back as `finish_reason=
+# 'length'` carrying either a truncated object, the reasoning trace echoed into
+# `content`, or a bare `{}`. Earlier revisions of this file asserted that
+# raising max_tokens "does not help" and that the remedy was to drop the format
+# constraint; a controlled pair of live calls -- same question, same constraint,
+# 700 tokens gives `{}` and 2048 gives a cited answer -- says otherwise.
 # ---------------------------------------------------------------------------
-def test_an_empty_json_object_triggers_one_retry_without_the_format_constraint(chunks, ranked):
-    # nemotron-3-super satisfies `response_format: json_object` with `{}`: it
-    # spends the budget reasoning and emits the empty object, which parses
-    # perfectly and answers nothing. Raising max_tokens does not help, because
-    # nothing was truncated -- so the retry drops the constraint instead.
-    provider = FakeProvider(["{}", payload("recovered on the retry [1].")])
-    answer = generate("q", ranked, chunks, provider)
+def _truncated(text: str = "") -> LLMResponse:
+    return LLMResponse(text=text, model="fake-model", provider="fake", finish_reason="length")
+
+
+def test_a_truncated_response_is_retried_with_a_wider_budget(chunks, ranked):
+    provider = FakeProvider(
+        [
+            _truncated('{"sufficient": true, "answer": "cut off mid-'),
+            payload("recovered on the retry [1]."),
+        ]
+    )
+    answer = generate("q", ranked, chunks, provider, max_tokens=700, retry_multiplier=3)
     assert not answer.refused
     assert answer.cited_chunk_ids == [ranked[0]]
-    assert len(provider.prompts) == 2
+    assert [k["max_tokens"] for k in provider.kwargs] == [700, 2100]
+    # The budget is the only thing the retry changes. Dropping the format
+    # constraint as well would confound the two, and the constraint is not what
+    # the measurement indicts.
+    assert [k["json_object"] for k in provider.kwargs] == [True, True]
+
+
+def test_an_empty_json_object_is_the_same_defect_and_retries(chunks, ranked):
+    # `{}` is what comes back when the model spent its budget reasoning but got
+    # far enough to open the object. Same cause, same remedy.
+    provider = FakeProvider(["{}", payload("recovered [1].")])
+    answer = generate("q", ranked, chunks, provider)
+    assert not answer.refused and len(provider.prompts) == 2
 
 
 def test_a_payload_with_an_empty_answer_string_also_retries(chunks, ranked):
@@ -312,8 +341,30 @@ def test_the_retry_happens_once_and_a_second_empty_reply_refuses(chunks, ranked)
     assert len(provider.prompts) == 2, "exactly one retry, not a loop"
 
 
+def test_still_truncated_after_the_retry_refuses_as_truncated_not_unparseable(chunks, ranked):
+    # The distinction is the point: "unparseable" sends an operator to look at
+    # the prompt, when the budget is what needs changing. Mislabelling this is
+    # what made the live defect take three sessions to identify.
+    provider = FakeProvider([_truncated("{partial"), _truncated("{still partial")])
+    answer = generate("q", ranked, chunks, provider)
+    assert answer.refused and answer.refusal_reason == "truncated"
+    assert len(provider.prompts) == 2
+
+
+def test_a_cached_response_is_never_retried(chunks, ranked):
+    # Replay must reproduce what was recorded. Three of the 180 committed answer
+    # entries would otherwise trigger this branch, quietly rewriting published
+    # numbers on a machine that happens to be online.
+    cached = LLMResponse(
+        text="{}", model="fake-model", provider="fake", finish_reason="length", cached=True
+    )
+    provider = FakeProvider([cached, payload("must not be reached [1].")])
+    answer = generate("q", ranked, chunks, provider)
+    assert answer.refused and len(provider.prompts) == 1
+
+
 def test_unparseable_prose_is_not_retried(chunks, ranked):
-    # Malformed output is not the retryable case; only a vacuous-but-valid one is.
+    # Malformed output that ran to completion is not the retryable case.
     provider = FakeProvider(["I will not emit JSON.", payload("unused [1].")])
     answer = generate("q", ranked, chunks, provider)
     assert answer.refused and answer.refusal_reason == "unparseable"
@@ -326,7 +377,14 @@ def test_a_genuine_refusal_is_not_mistaken_for_an_empty_payload(chunks, ranked):
     assert answer.refusal_reason == "model" and len(provider.prompts) == 1
 
 
-def test_no_retry_when_the_format_constraint_was_never_requested(chunks, ranked):
+def test_truncation_is_retried_even_without_the_format_constraint(chunks, ranked):
+    # `finish_reason` is a fact about the call, not about the format asked for.
+    provider = FakeProvider([_truncated("half an ans"), payload("recovered [1].")])
+    answer = generate("q", ranked, chunks, provider, json_object=False)
+    assert not answer.refused and len(provider.prompts) == 2
+
+
+def test_an_empty_payload_is_not_chased_when_json_was_never_requested(chunks, ranked):
     provider = FakeProvider(["{}", payload("unused [1].")])
     answer = generate("q", ranked, chunks, provider, json_object=False)
     assert answer.refused and len(provider.prompts) == 1

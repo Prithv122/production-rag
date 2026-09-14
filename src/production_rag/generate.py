@@ -58,6 +58,7 @@ when they click through, and they still parse with one regex.
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from collections.abc import Sequence
@@ -79,6 +80,20 @@ DEFAULT_CONTEXT_CHARS = 12_000
 MAX_PASSAGE_CHARS = 3_000
 
 REFUSAL_TEXT = "The documentation provided does not answer this question."
+
+#: The answer path's completion budget on a model that does not reason before
+#: answering. It is a published-number constant, not a taste: `CachedProvider`
+#: keys on `max_tokens`, so the 180 committed entries the answer table replays
+#: from are all keyed at 700. Reasoning arms raise it through
+#: `providers.answer_budget` rather than by changing this.
+DEFAULT_ANSWER_TOKENS = 700
+
+#: How much to widen the completion budget on the retry. Three is what the
+#: ground-truth path settled on (`propose --retry-multiplier`) and the measured
+#: reasoning traces here -- 504-857 tokens -- sit comfortably inside 3x700.
+DEFAULT_RETRY_MULTIPLIER = 3
+
+logger = logging.getLogger(__name__)
 
 ANSWER_SYSTEM = (
     "You answer questions about DuckDB, dbt and Dagster strictly from the numbered "
@@ -186,10 +201,15 @@ class Answer:
     text: str
     refused: bool
     refusal_reason: str = ""
-    """`""`, `"no_context"`, `"low_score"`, `"model"`, `"unparseable"` or
-    `"provider_error"`. The last two refuse for the user's sake -- a broken
-    generation must not be presented as an answer -- and are counted apart from
-    a deliberate refusal, because they are bugs and refusals are not."""
+    """`""`, `"no_context"`, `"low_score"`, `"model"`, `"truncated"`,
+    `"unparseable"` or `"provider_error"`. The last three refuse for the user's
+    sake -- a broken generation must not be presented as an answer -- and are
+    counted apart from a deliberate refusal, because they are bugs and refusals
+    are not. `"truncated"` is split out from `"unparseable"` because the remedy
+    differs and conflating them cost this project two sessions: unparseable
+    output is a prompting or model-capability problem, whereas a response that
+    stopped at `finish_reason='length'` is a budget problem and the text was
+    never finished in the first place."""
 
     citations: list[Citation] = field(default_factory=list)
     passages: list[Passage] = field(default_factory=list)
@@ -280,6 +300,20 @@ def _is_empty_payload(text: str) -> bool:
     return isinstance(payload, dict) and not str(payload.get("answer", "")).strip()
 
 
+def _should_widen(response: LLMResponse, *, json_object: bool) -> bool:
+    """Did this response run out of completion budget rather than answer?
+
+    Two signals, because the provider reports the same event two ways. The
+    honest one is `finish_reason='length'`. The other is a payload that parses
+    and says nothing -- `{}` or `{"sufficient": true}` -- which is what comes
+    back when the model spent its budget reasoning but got far enough to open
+    the object. Both mean the same thing and both are fixed by the same retry.
+    """
+    if str(response.finish_reason) == "length":
+        return True
+    return json_object and _is_empty_payload(response.text)
+
+
 def _split_marker(group: str) -> list[int]:
     return [int(part) for part in re.split(r"[,;]", group) if part.strip()]
 
@@ -361,9 +395,10 @@ def generate(
     top_score: float | None = None,
     min_top_score: float = 0.0,
     sentences: int = 4,
-    max_tokens: int = 700,
+    max_tokens: int = DEFAULT_ANSWER_TOKENS,
     max_chars: int = DEFAULT_CONTEXT_CHARS,
     json_object: bool = True,
+    retry_multiplier: int = DEFAULT_RETRY_MULTIPLIER,
 ) -> Answer:
     """Answer `question` from the retrieved `chunk_ids`, or refuse.
 
@@ -403,27 +438,44 @@ def generate(
             max_tokens=max_tokens,
             json_object=json_object,
         )
-        # A reasoning model under `response_format: json_object` can satisfy the
-        # constraint with the *empty* object: it spends its budget thinking and
-        # then emits `{}`, which parses perfectly and answers nothing. Observed
-        # on nemotron-3-super, intermittently and per-prompt -- raising
-        # max_tokens does not fix it, because the model is not being truncated.
+        # `max_tokens` is not an answer budget on a reasoning model -- it is
+        # shared with the thinking trace, and the trace goes first. Measured
+        # against the deployed image, `nemotron-3-super` spends 504-857
+        # completion tokens reasoning before it writes a character of JSON, so a
+        # 700-token budget is gone mid-thought and the call comes back with
+        # `finish_reason='length'` in one of three shapes: the reasoning trace
+        # echoed into `content`, real JSON truncated mid-string, or -- if the
+        # model got as far as opening the object -- a bare `{}`. All three are
+        # the same defect. So the retry widens the budget and changes nothing
+        # else, because the budget is the variable the measurement indicts.
         #
-        # So the retry drops the constraint rather than widening it. This is the
-        # same conclusion session 2 reached from the other direction: structured
-        # output on this model is a capability claim, not a guarantee, which is
-        # why `extract_json` exists to repair prose-wrapped JSON. Letting the
-        # model answer in its natural shape and repairing that is more reliable
-        # than insisting on a shape it satisfies vacuously.
-        if json_object and _is_empty_payload(response.text):
+        # This is the same remedy `propose` has had since session 2, in a
+        # comment that describes this exact failure ("a reasoning model can
+        # spend its entire token budget on a preamble and stop with
+        # finish=length before emitting a character of JSON"). The ground-truth
+        # path got it; the answer path did not.
+        #
+        # `cached` is the guard that keeps replay honest: a cached response *is*
+        # the recorded outcome, and retrying it would quietly rewrite published
+        # numbers -- three of the 180 committed answer entries would trigger
+        # this branch.
+        if not response.cached and _should_widen(response, json_object=json_object):
+            logger.warning(
+                "widening budget %d -> %d after finish_reason=%r: %s",
+                max_tokens,
+                max_tokens * retry_multiplier,
+                response.finish_reason,
+                question[:80],
+            )
             response = provider.complete(
                 prompt,
                 system=ANSWER_SYSTEM,
                 temperature=0.0,
-                max_tokens=max_tokens,
-                json_object=False,
+                max_tokens=max_tokens * retry_multiplier,
+                json_object=json_object,
             )
     except ProviderError as exc:
+        logger.warning("refusing (provider_error) for %r: %s", question[:80], str(exc)[:200])
         return Answer(
             question=question,
             text=REFUSAL_TEXT,
@@ -467,10 +519,27 @@ def _answer_from_response(
         # output here would put unvalidated, uncited prose in front of the user
         # under the same UI as a checked answer, which is the whole failure this
         # module exists to prevent -- so it refuses and records why.
+        #
+        # `truncated` and `unparseable` are separated here on the strength of a
+        # field that was already on `LLMResponse` and that nothing read: a
+        # response that stopped at `finish_reason='length'` was cut off, not
+        # malformed, and telling an operator "unparseable" sends them to look at
+        # the prompt when the budget is what needs changing. That mislabelling
+        # is precisely what made this defect take three sessions to find.
+        reason = "truncated" if str(response.finish_reason) == "length" else "unparseable"
+        logger.warning(
+            "refusing (%s) model=%s finish_reason=%r completion_tokens=%d: %s: %s",
+            reason,
+            response.model,
+            response.finish_reason,
+            response.completion_tokens,
+            type(exc).__name__,
+            str(exc)[:200],
+        )
         return Answer(
             text=REFUSAL_TEXT,
             refused=True,
-            refusal_reason="unparseable",
+            refusal_reason=reason,
             error=f"{type(exc).__name__}: {exc}"[:300],
             **common,
         )
