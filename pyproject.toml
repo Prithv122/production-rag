@@ -19,6 +19,9 @@ production-rag = "production_rag.cli:main"
 embed = [
     "sentence-transformers>=3.0",
 ]
+ann = [
+    "faiss-cpu>=1.15",
+]
 
 [build-system]
 requires = ["hatchling"]

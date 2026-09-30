@@ -690,6 +690,60 @@ def _warm_rewrites(questions, provider, *, workers: int = 6) -> None:
 
 
 # ---------------------------------------------------------------------------
+# ann-bench
+# ---------------------------------------------------------------------------
+def cmd_ann_bench(args: argparse.Namespace) -> int:
+    from . import ann
+
+    kinds = [i for i in (args.index or ["exact", *ann.FAISS_KINDS]) if i != "exact"]
+    e2e, source = args.e2e_p95_ms, "flag" if args.e2e_p95_ms is not None else None
+    try:
+        if kinds:
+            ann._faiss()  # fail before loading anything heavy
+        if e2e is None and args.e2e_from is not None:
+            e2e, source = ann.read_e2e_p95(args.e2e_from), f"file:{args.e2e_from}"
+        common = dict(
+            kinds=kinds, k=args.k, repeats=args.repeats, e2e_p95_ms=e2e, e2e_source=source
+        )
+        if args.synthetic:
+            result = ann.run_bench(
+                sizes=args.n or [20000],
+                dim=args.dim,
+                n_queries=args.queries,
+                seed=args.seed,
+                **common,
+            )
+        else:
+            from .groundtruth import index_chunks_by_doc, load_questions
+
+            questions = [q for q in load_questions(args.questions) if q.verified != "rejected"]
+            if args.verified_only:
+                questions = [q for q in questions if q.verified in ("accepted", "edited")]
+            if not questions:
+                print("no questions to evaluate")
+                return 1
+            args.embed_cache = None  # queries only; never touch the document-embedding cache
+            embedder = _embedder(args)
+            retriever = Retriever.load(args.indexes, args.strategy, embedder=embedder)
+            result = ann.run_bench(
+                retriever=retriever,
+                embedder=embedder,
+                questions=questions,
+                by_doc=index_chunks_by_doc(retriever.chunks.values()),
+                seed=args.seed,
+                **common,
+            )
+    except (ModuleNotFoundError, OSError, ValueError) as exc:
+        print(f"ann-bench: {exc}", file=sys.stderr)
+        return 1
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    print(ann.format_table(result))
+    print(f"\nwrote {args.out}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # wiring
 # ---------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
@@ -875,6 +929,35 @@ def build_parser() -> argparse.ArgumentParser:
     band.add_argument("--trials", type=int, default=20_000)
     band.add_argument("--seed", type=int, default=20260908)
     band.set_defaults(func=cmd_band)
+
+    ann_bench = subparsers.add_parser(
+        "ann-bench",
+        help="exact numpy search vs FAISS approximate indexes: recall, latency, build, size",
+    )
+    ann_bench.add_argument(
+        "--synthetic", action="store_true", help="seeded vectors, no index needed"
+    )
+    ann_bench.add_argument("--n", type=int, action="append", help="synthetic sizes (default 20000)")
+    ann_bench.add_argument("--dim", type=int, default=384)
+    ann_bench.add_argument("--queries", type=int, default=200)
+    ann_bench.add_argument("--indexes", type=Path, default=INDEX_DIR)
+    ann_bench.add_argument("--strategy", choices=sorted(CHUNKERS), default="heading")
+    ann_bench.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
+    ann_bench.add_argument("--verified-only", action="store_true")
+    ann_bench.add_argument(
+        "--index",
+        action="append",
+        choices=["exact", "flat", "hnsw", "ivf", "ivfpq"],
+        help="which indexes to measure (default all); exact is always the ground truth",
+    )
+    ann_bench.add_argument("-k", type=int, default=10)
+    ann_bench.add_argument("--repeats", type=int, default=3)
+    ann_bench.add_argument("--seed", type=int, default=20260930)
+    ann_bench.add_argument("--e2e-p95-ms", type=float, help="end-to-end p95 denominator override")
+    ann_bench.add_argument("--e2e-from", type=Path, help="read config.e2e_p95_ms from a prior run")
+    ann_bench.add_argument("--out", type=Path, default=Path("eval/results/ann.json"))
+    _add_component_args(ann_bench)
+    ann_bench.set_defaults(func=cmd_ann_bench)
 
     cache = subparsers.add_parser("cache", help="bundle or restore the replay caches")
     cache.add_argument(

@@ -732,3 +732,34 @@ the six headline columns and not the whole row. The replay now reproduces every 
 `truncated` is also split out from `unparseable` as a refusal reason — a budget problem and a
 prompting problem should not send an operator to the same place — but `ArmSummary.parse_failure`
 deliberately counts both, so renaming a reason underneath the published table cannot move it.
+
+## Approximate indexes: harness built, not yet measured (2026-09-30)
+
+"Dense retrieval: exact search, no ANN" is a claim about a ratio, so this session built the
+instrument that tests it: `production-rag ann-bench` (`src/production_rag/ann.py`, optional
+`ann` extra, one extra CI job). It compares the exact numpy `DenseIndex` with FAISS flat
+(a control), HNSW, IVF-Flat and IVF-PQ on recall@10 against exact, p50/p95 search latency,
+build time and serialised size. On the real index it also runs the `dense` arm end to end
+per configuration (recall@5, nDCG@10). Latency is timed around `search_vector` on
+pre-encoded queries; `evaluate_arm`'s latency includes query encoding and is ignored here.
+
+**The rule, pre-registered by the owner on 2026-09-30 and fixed:** exact search stops being
+enough when exact-search p95 > 10% of the end-to-end p95 (`EXACT_SHARE_LIMIT = 0.10`). The
+denominator is the p95 of `Retriever.retrieve(..., arm="hybrid_score_weighted")` on the same
+strategy and questions, with the exact index and the real embedder: query encoding included,
+no rerank, no generation. That arm is the live app's default. Override with `--e2e-p95-ms` or
+`--e2e-from`; in `--synthetic` mode without one, the verdict fields are null.
+
+A fixed denominator in the synthetic sweep slightly overstates exact's share at large n,
+because a real pipeline's other stages would grow too. That errs toward ANN, so an "exact is
+enough" verdict from the sweep is the conservative one.
+
+Grids: HNSW `M=32`, `ef_construction=200`, `ef_search` in 16/32/64/128/256; IVF and IVF-PQ
+`nprobe` in 1/4/16/64 clipped to `nlist` (default about 4*sqrt(n), capped at n // 39); IVF-PQ
+`m=48`, 8 bits (at a dim 48 does not divide, the largest divisor below it). FAISS runs on one
+thread; the thread environment variables and library versions are recorded in the output.
+
+RSS and psutil were left out: serialised index size is the reproducible memory figure.
+
+**No numbers exist yet.** Every figure is measured later on the owner's machine, and the
+README is unchanged until that run.
