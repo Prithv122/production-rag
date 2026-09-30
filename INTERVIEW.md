@@ -75,7 +75,7 @@ feeling.
 
 Under load, exact search breaks first, and not where it looks. At 100× (~2.4 M chunks) the
 vector matrix is ~3.5 GB — still loadable, but a query moves 3.5 GB through memory, so
-latency goes from sub-millisecond to hundreds of milliseconds and *memory bandwidth*, not
+latency goes from a few milliseconds to hundreds of milliseconds and *memory bandwidth*, not
 compute, is the wall. That's when HNSW earns its approximation error — and the honest way to
 introduce it is to measure recall against the exact baseline this repo already has, because
 the exact result is the ground truth ANN gets compared to.

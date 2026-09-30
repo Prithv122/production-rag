@@ -120,7 +120,7 @@ not work on this corpus. See §5.
 | BM25 | Written in-repo over a scipy sparse matrix | `rank_bm25` | `rank_bm25` loops in Python per query; this grid runs thousands of full-corpus scans. Precomputing the weight matrix gives **0.37 ms** queries |
 | Tokenizer | Identifiers emitted whole **and** split | Either alone | Whole-only misses "schema change" → `on_schema_change`; split-only destroys the exact-match recall BM25 exists for |
 | Stopwords | None | Standard English stoplist | `in`, `as`, `is`, `order`, `by` are SQL keywords and real queries here. IDF discounts frequency from this corpus instead |
-| Vector search | Exact, numpy | FAISS / HNSW / a vector DB | 23k × 384 = 35 MB; exact search is a matrix-vector product. ANN would add a dependency, a tuning knob and approximation error to speed up a millisecond. See §7 for where that flips |
+| Vector search | Exact, numpy | FAISS / HNSW / a vector DB | 23k × 384 = 35 MB; exact search is a matrix-vector product. ANN would add a dependency, a tuning knob and approximation error to speed up a millisecond. Tested rather than assumed: see "Exact vs approximate search" in §5, and §7 for where it flips |
 | Encoder | `Embedder` Protocol, torch in an optional extra | Direct dependency | CI runs against a deterministic fake and never downloads ~2 GB. CI actively asserts torch is absent |
 | Fusion | RRF **and** score fusion, both measured | Picking one | BM25 has a true zero floor (absent); cosine ranks everything (less similar). Which fusion handles that better is empirical |
 | Chunk sizing | Characters | Tokens | A token budget drags the encoder's tokenizer — and torch — into every test |
@@ -176,10 +176,13 @@ queries on an idle machine.
 
 **Why no ANN.** Both query columns are an exhaustive pass over the entire corpus — every
 vector, every posting — with no index structure and no approximation. At 1–2 ms, an
-approximate index would trade guaranteed recall for a saving that does not exist. §7 covers
-the scale at which that flips. Latency is memory-bandwidth bound and therefore
+approximate index would trade guaranteed recall for a saving that is small next to the rest
+of a query; the subsection after this one measures that instead of asserting it, and §7
+covers the scale at which it flips. Latency is memory-bandwidth bound and therefore
 load-sensitive: the same `fixed` index measured 1.07 ms idle and 3.43 ms while another
-build saturated five cores, which is why the measurement condition is stated.
+build saturated five cores, which is why the measurement condition is stated. The figures
+in this table are means; the next subsection re-measures the same search as p50/p95, so
+read its note on the two before comparing them.
 
 **The three rows are a natural experiment.** Same corpus, same encoder, same hardware —
 chunking is the only variable, and it moves mean chunk length from 536 to 997 characters:
@@ -191,6 +194,57 @@ Encoder cost is set by tokens; "texts per second" is an artefact of whatever tex
 you benchmarked on. This corrected an estimate of mine that was ~27× optimistic — the
 original benchmark's *token* figure had been roughly right all along, only the unit was
 wrong. See [NOTES.md](NOTES.md).
+
+### Exact vs approximate search — measured
+
+`production-rag ann-bench` compares exact numpy search with FAISS flat (a control), HNSW,
+IVF-Flat and IVF-PQ. These numbers are measured, not replayed: they time this machine, so
+they do not reproduce offline the way the retrieval tables do (§6 has the commands).
+
+- **Index latency is timed around the search call alone**, on pre-encoded query vectors. The
+  query encoder dominates end-to-end dense latency and would hide the comparison.
+- **One thread** (FAISS and the BLAS libraries), one untimed warm-up pass, then three timed
+  passes; p50 and p95 over the pooled calls.
+- **Recall@10 is against the exact result.** On the real index each configuration also runs
+  through the `dense` arm, scoring recall@5 and nDCG@10 (184 questions, 177 scorable: every
+  question in the eval set that was not rejected).
+- **The decision rule was fixed before measuring (2026-09-30):** exact search stops being
+  enough when exact-search p95 exceeds 10% of the end-to-end p95. End-to-end is the p95 of
+  the live default arm, `hybrid_score_weighted`, on the exact index with the real encoder:
+  query encoding included, no rerank, no generation.
+
+Real `heading` index, 22,789 × 384:
+
+| Index | Setting | Recall@10 vs exact | p95 | Build | Size | `dense` recall@5 | `dense` nDCG@10 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| exact | | 1.000 | 4.33 ms | — | 35.0 MB | 0.555 | 0.499 |
+| flat (control) | | 0.998 | 4.18 ms | 0.02 s | 35.0 MB | 0.555 | 0.499 |
+| HNSW | `ef_search` 16 | 0.914 | 0.31 ms | 14.4 s | 41.2 MB | 0.538 | 0.487 |
+| HNSW | `ef_search` 64 | 0.987 | 0.74 ms | 14.4 s | 41.2 MB | 0.555 | 0.501 |
+| HNSW | `ef_search` 256 | 0.999 | 2.76 ms | 14.4 s | 41.2 MB | 0.555 | 0.499 |
+| IVF-Flat | `nprobe` 16 | 0.821 | 0.38 ms | 2.1 s | 36.1 MB | 0.508 | 0.448 |
+| IVF-Flat | `nprobe` 64 | 0.954 | 1.06 ms | 2.1 s | 36.1 MB | 0.544 | 0.492 |
+| IVF-PQ | `nprobe` 64 | 0.643 | 0.58 ms | 25.8 s | 2.6 MB | 0.497 | 0.431 |
+
+HNSW uses M=32 and `ef_construction`=200; IVF uses 584 lists; IVF-PQ uses 48 sub-quantisers
+at 8 bits. The full sweep is in [eval/results/ann.json](eval/results/ann.json).
+
+**Verdict: exact search stays.** Exact p95 is 4.33 ms against a measured end-to-end p95 of
+164.5 ms, a share of **2.6%**, inside the 10% rule. HNSW at `ef_search` 64 is a faster
+alternative that matches exact on both end-to-end metrics, but it saves about 3.6 ms out of
+164.5 and costs a 14 s build and a tuning knob; the rule says it is not needed at this size.
+IVF-PQ shrinks the index from 35 MB to 2.6 MB at a visible quality cost (recall@5 0.497
+against 0.555), which buys nothing when the index is 35 MB.
+
+**Two latency figures for the same search, and why they differ.** The 1.68 ms for `heading`
+in the index table above is a *mean* over 500 queries on an idle machine, with thread count
+not recorded. Here exact search is p50 2.73 ms and p95 4.33 ms, pinned to one thread, over
+184 real questions. A different statistic, a different query set and pinned threading: the
+two are not directly comparable, and this run did not isolate which of them accounts for the
+gap. Use the p95 here for the rule, and the mean above for the shape of the cost. The
+denominator is also a single measurement, and §7 shows how much this machine's p95 moves
+between runs; the real-corpus verdict has a wide margin (2.6% against 10%), so it does not
+depend on the third decimal.
 
 ### A worked example — illustrative, not a metric
 
@@ -732,6 +786,19 @@ uv run production-rag index --strategy heading
 uv run production-rag eval --replay --verified-only        # retrieval
 ```
 
+The exact-vs-approximate benchmark is the exception: it times the machine it runs on, so it
+is re-run, not replayed, and its latencies will differ with hardware and load. It needs the
+dense index above plus the `ann` extra, and the thread variables set to 1 (bash shown;
+PowerShell uses `$env:OMP_NUM_THREADS="1"`):
+
+```bash
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+uv sync --extra embed --extra ann
+uv run production-rag ann-bench --indexes indexes --strategy heading --out eval/results/ann.json
+uv run production-rag ann-bench --synthetic --n 100000 --n 500000 --n 1000000 --dim 384 \
+  --e2e-from eval/results/ann.json --out eval/results/ann_synthetic.json
+```
+
 **Verified, not asserted.** The answer table above was reproduced from a *fresh* cache built
 only from the committed bundle, with `OPENROUTER_API_KEY=""` and `OLLAMA_HOST` pointed at a
 dead port — identical figures to the live run, so nothing in it depends on a key, a quota or
@@ -762,11 +829,40 @@ uv run production-rag cache export               # re-bundle for replay
 
 **Exact search breaks first, and not where it looks.** At 100× (~2.4 M chunks) the vector
 matrix is ~3.5 GB — still loadable, but a full pass moves 3.5 GB through memory per query,
-so latency goes from sub-millisecond to hundreds of milliseconds and memory bandwidth,
+so latency goes from a few milliseconds to hundreds of milliseconds and memory bandwidth,
 not compute, becomes the wall. That is the point to introduce HNSW, and the honest
 consequence is accepting recall below 1.0 in exchange — which should be *measured* against
 the exact baseline this repo already has, since the exact result is the ground truth ANN
 gets compared to.
+
+**Where it stops being enough was measured, to a region and no further.** Under the rule
+fixed before measuring (exact p95 above 10% of the end-to-end p95, §5), the real 22,789-vector
+index passes at 2.6%. A synthetic sweep at 384 dimensions, one thread, with the end-to-end
+p95 held at the measured 164.5 ms, fails the rule at every size tested: exact p95 was
+20.8 ms at 100,000 vectors (12.6%), 85.9 ms at 500,000 (52%) and 218.5 ms at 1,000,000
+(133%). The crossover therefore lies between 22,789 and 100,000 vectors, and this benchmark
+does not narrow it. Read that as a signal to reconsider ANN as the corpus approaches that
+range, not as a reason to adopt it today. Four limits on the evidence:
+
+- **Synthetic vectors measure latency scaling, not retrieval quality.** They are clustered
+  unit vectors, and recall on them does not transfer: IVF-PQ reached only 0.01–0.11
+  recall@10 there against 0.64 on the real index.
+- **The denominator is fixed.** A real pipeline's other stages would also grow with the
+  corpus, so a fixed 164.5 ms overstates exact search's share at large n and the crossover
+  errs early.
+- **Timing on this machine is noisy.** Exact p95 at 100,000 vectors was 20.8 ms in the full
+  sweep and 32.2 ms in an independent repeat (at 500,000: 85.9 ms and 136.1 ms), a 55% and a
+  58% difference. Both 100,000 figures exceed the 10% line (12.6% and 19.6%), so the verdict
+  holds while the figures are imprecise. Two runs are not enough to characterise the
+  spread, only to show it is large. The repeat is recorded in [NOTES.md](NOTES.md).
+- **One machine, one thread.** Latency depends on memory bandwidth and load, and the sweep
+  was not repeated across hardware.
+
+If the corpus does cross over, the approximate index is not free. In the same sweep HNSW at
+100,000 vectors reached recall@10 0.982 at `ef_search` 64 with p95 0.68 ms, a 49 s build and
+181 MB. At 1,000,000 it reached 0.917 at `ef_search` 128 (p95 2.06 ms) and 0.982 at 256
+(3.23 ms), with a 27-minute single-threaded build and 1.8 GB. Each of those is one run. The
+full sweep is in [eval/results/ann_synthetic.json](eval/results/ann_synthetic.json).
 
 **BM25's weight matrix stops fitting the rebuild model.** 1.1 M nonzeros becomes ~110 M;
 build time goes from 2.5 s to minutes, and the whole-index rebuild this project does on

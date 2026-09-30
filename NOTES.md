@@ -763,3 +763,46 @@ RSS and psutil were left out: serialised index size is the reproducible memory f
 
 **No numbers exist yet.** Every figure is measured later on the owner's machine, and the
 README is unchanged until that run.
+
+## Approximate indexes: measured (2026-10-01)
+
+Supersedes the "no numbers exist yet" line above; the measurements were taken 2026-09-30.
+The rule, the denominator and the grids are as stated in that section and were not changed.
+
+**Real `heading` index (n = 22,789, dim 384, 184 questions timed, 177 scorable, one thread).**
+Exact search p50 2.73 ms, p95 4.33 ms. Measured end-to-end p95 (`hybrid_score_weighted`, exact
+index, real encoder) 164.5 ms. Share 0.0263, inside the 10% rule, so exact search stays.
+Recall@10 against exact: flat 0.998, HNSW 0.914 / 0.987 / 0.999 at `ef_search` 16 / 64 / 256,
+IVF-Flat 0.954 at `nprobe` 64, IVF-PQ 0.643 at best. HNSW at 64 matched exact on the `dense`
+arm (recall@5 0.555, nDCG@10 0.501 against 0.555 / 0.499). Output: `eval/results/ann.json`.
+
+**Synthetic sweep (dim 384, one thread, denominator fixed at the measured 164.5 ms).** Exact
+p95 20.8 ms at 100,000 (share 0.126), 85.9 ms at 500,000 (0.522), 218.5 ms at 1,000,000
+(1.328): not enough at any of them. The crossover is between 22,789 and 100,000 vectors and is
+not narrowed further. An interpolated figure (~80k) was worked out and deliberately not
+published: the variance below makes it false precision. Output: `eval/results/ann_synthetic.json`.
+
+**Run-to-run variance, recorded so the limit is auditable.** After the sweep, the exact-only
+rows were re-measured once with no other benchmark running, written to a scratch file and
+not committed. p95 at 100,000 vectors moved from 20.8 ms to 32.2 ms (p50 14.5 to 17.1 ms, share
+0.126 to 0.196); at 500,000 from 85.9 ms to 136.1 ms (p50 66.1 to 84.0 ms, share 0.522 to
+0.827). The p95 differs by 55% and 58% between two runs on the same machine. Both 100,000
+readings exceed the 10% line, so the verdict is unchanged; the figures are not precise. Two
+runs show the spread is large but do not characterise it. Within the sweep, some tail
+readings are also out of order (HNSW at 500,000: p95 1.91 ms at `ef_search` 16 against 1.39 ms
+at 32; flat p95 above exact p95), which points the same way.
+
+**Provenance of the sweep file.** One sweep was launched from this session and the file was
+written once. FAISS was the locked 1.15.1 wheel from `uv sync`. Another process overlapping
+during its ~1.5 h cannot be ruled out from here, which is one more reason to quote the
+crossover as a region rather than a number. The rule was not revisited after seeing the
+results.
+
+**Latency figures not to confuse.** README §5 reports 1.68 ms for `heading` dense search as a
+mean over 500 queries on an idle machine (threads not recorded). The figures here are p50 / p95
+on one pinned thread over real questions. They are different measurements; which factor
+accounts for the gap was not isolated.
+
+Not done, by decision: no 40k / 60k / 80k sweep, no full rerun, no change to `dense.py` (its
+"exact, not ANN" docstring still holds at this size). `GUIDELINES.md` still says "365 fast + 18
+slow" tests; the count is now 375 without the `ann` extra and 387 with it, and was left alone.
