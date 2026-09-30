@@ -804,5 +804,6 @@ on one pinned thread over real questions. They are different measurements; which
 accounts for the gap was not isolated.
 
 Not done, by decision: no 40k / 60k / 80k sweep, no full rerun, no change to `dense.py` (its
-"exact, not ANN" docstring still holds at this size). `GUIDELINES.md` still says "365 fast + 18
-slow" tests; the count is now 375 without the `ann` extra and 387 with it, and was left alone.
+"exact, not ANN" docstring still holds at this size). The fast-suite count in `GUIDELINES.md`
+("365 fast + 18 slow") was stale once the harness landed; it now reads 387 with the `ann` extra,
+375 without.
