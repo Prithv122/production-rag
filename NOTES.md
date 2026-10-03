@@ -874,3 +874,32 @@ were all written by the local fallback model, not the one the cache key names (s
 README's cache audit), 119 of the 368 are not phrased as questions, and only 30
 are spot-checked for intent drift, so `hit_rate` is measured on paraphrases a user would not
 type.
+
+## Semantic cache: harness built, not yet measured (2026-10-03)
+
+The README argues caching is a win without measuring a semantic cache. The extra risk is a false
+hit: a question that reads like a cached one but needs a different answer (`read_parquet` against
+`write_parquet`, "supports" against "does not support"). This builds the instrument for that trade
+and changes no claim.
+
+**What exists.** `semcache.py` caches whole answers keyed by the question's embedding. It sits in
+front of the exact cache (`CachedProvider`): lookup order is semantic cache, then the normal
+pipeline, and it never touches an LLM-call entry. It is bypassed entirely, no lookup and no insert,
+whenever `is_replaying(provider)` is true, so `--replay` runs cannot serve one question's answer for
+another. `tests/test_semcache.py` guards that: the exact-cache files stay byte-identical, the
+semantic lookup is never called, and a subprocess check confirms the replay path never imports the
+new modules. Transient refusals are never inserted, and scope is part of the key from day one. It is
+**disabled by default** (`DEFAULT_THRESHOLD = None`) until a measured threshold is committed, and is
+not wired into `ask`, `answer-eval`, `eval` or the app.
+
+**The harness.** `semcache_eval.py` and `production-rag semcache-sweep` apply the rule in the
+2026-10-04 section above, which is not restated here. True pairs come from the committed rewrites,
+read in memory from the replay bundle; the config records which model wrote them (`answered_by`).
+The lookup is top-1 over every cached question, so a variant landing on a different question is a
+wrong-entry hit, reported apart from near-miss false hits. Both input formats are in the module
+docstring. `eval/near_miss.jsonl` is frozen and committed, its sha256 pinned in the code; the
+paraphrase-check file is the owner's hand-work and does not exist yet (`--sample-paraphrases N`
+writes its template). Any run that departs from the conditions above is a diagnostic.
+
+**No numbers exist yet.** The only runs so far used a hashing embedder to check the wiring. The
+README is unchanged until the sweep has been run on the owner's machine.

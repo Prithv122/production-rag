@@ -744,6 +744,62 @@ def cmd_ann_bench(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# semcache-sweep
+# ---------------------------------------------------------------------------
+def cmd_semcache_sweep(args: argparse.Namespace) -> int:
+    from . import semcache_eval as se
+
+    near_miss_path = args.near_miss or se.NEAR_MISS_PATH
+    checks_path = args.paraphrase_checks or se.PARAPHRASE_CHECKS_PATH
+    thresholds = tuple(args.threshold) if args.threshold else se.THRESHOLDS
+    seed = se.SEED if args.seed is None else args.seed
+    try:
+        from .groundtruth import load_questions
+
+        questions = load_questions(args.questions)
+        pairs, pair_stats = se.load_true_pairs(args.bundle, questions)
+        if args.sample_paraphrases is not None:
+            written = se.write_spot_check_sample(
+                pairs, args.sample_paraphrases, checks_path, seed=seed
+            )
+            print(f"wrote {len(written)} rows to {checks_path} (seed {seed}, same_intent null)")
+            return 0
+        near_misses = se.load_near_misses(near_miss_path, questions)
+        checks = se.load_paraphrase_checks(checks_path, pairs) if checks_path.exists() else None
+        if args.fake_embedder:
+            embedder = se.HashEmbedder()
+        else:
+            args.embed_cache = None  # queries only; never touch the document-embedding cache
+            embedder = _embedder(args)
+        result = se.sweep(
+            embedder,
+            pairs,
+            near_misses,
+            questions=questions,
+            thresholds=thresholds,
+            smoke=args.fake_embedder,
+            inputs={
+                "paths": {
+                    "questions": args.questions,
+                    "bundle": args.bundle,
+                    "near_miss": near_miss_path,
+                    "paraphrase_checks": checks_path if checks else None,
+                },
+                "pair_stats": pair_stats,
+                "checks": checks,
+            },
+        )
+    except (FileNotFoundError, FileExistsError, ValueError, ModuleNotFoundError) as exc:
+        print(f"semcache-sweep: {exc}", file=sys.stderr)
+        return 1
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    print(se.format_table(result))
+    print(f"\nwrote {args.out}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # wiring
 # ---------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
@@ -958,6 +1014,41 @@ def build_parser() -> argparse.ArgumentParser:
     ann_bench.add_argument("--out", type=Path, default=Path("eval/results/ann.json"))
     _add_component_args(ann_bench)
     ann_bench.set_defaults(func=cmd_ann_bench)
+
+    sweep = subparsers.add_parser(
+        "semcache-sweep",
+        help="semantic-cache threshold sweep: paraphrase hit rate vs near-miss false hits",
+    )
+    sweep.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
+    sweep.add_argument("--bundle", type=Path, default=LLM_BUNDLE, help="rewrite replay bundle")
+    sweep.add_argument(
+        "--near-miss", type=Path, help="default eval/near_miss.jsonl; an override is a diagnostic"
+    )
+    sweep.add_argument(
+        "--paraphrase-checks",
+        type=Path,
+        help="default eval/paraphrase_checks.jsonl; read only if the file exists",
+    )
+    sweep.add_argument(
+        "--fake-embedder", action="store_true", help="hashing smoke run, not a measurement"
+    )
+    sweep.add_argument(
+        "--threshold",
+        type=float,
+        action="append",
+        default=None,
+        help="repeatable; replaces the 0.70-0.99 grid and makes the run a diagnostic",
+    )
+    sweep.add_argument(
+        "--sample-paraphrases",
+        type=int,
+        metavar="N",
+        help="write the N-row spot-check template to --paraphrase-checks and exit",
+    )
+    sweep.add_argument("--seed", type=int, default=None, help="seed for --sample-paraphrases")
+    sweep.add_argument("--out", type=Path, default=Path("eval/results/semcache.json"))
+    _add_component_args(sweep)
+    sweep.set_defaults(func=cmd_semcache_sweep)
 
     cache = subparsers.add_parser("cache", help="bundle or restore the replay caches")
     cache.add_argument(
