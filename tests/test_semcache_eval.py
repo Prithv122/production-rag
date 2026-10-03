@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import re
 from itertools import pairwise
 from pathlib import Path
 
@@ -131,7 +132,7 @@ def test_near_miss_errors_name_the_line(tmp_path, bad, fragment):
     path = tmp_path / "nm.jsonl"
     first = {**GOOD, "id": "nm-0", "anchor": "read csv", "near_miss": "write csv"}
     path.write_text(json.dumps(first) + "\n" + json.dumps(bad) + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match=f"{path}:2") as err:
+    with pytest.raises(ValueError, match=re.escape(f"{path}:2")) as err:
         se.load_near_misses(path, qs)
     assert fragment in str(err.value)
 
@@ -139,7 +140,7 @@ def test_near_miss_errors_name_the_line(tmp_path, bad, fragment):
 def test_near_miss_bad_json_and_missing_file(tmp_path):
     path = tmp_path / "nm.jsonl"
     path.write_text(json.dumps(GOOD) + "\n{oops\n", encoding="utf-8")
-    with pytest.raises(ValueError, match=f"{path}:2: bad JSON"):
+    with pytest.raises(ValueError, match=re.escape(f"{path}:2: bad JSON")):
         se.load_near_misses(path, [question("q1", "read parquet")])
     with pytest.raises(FileNotFoundError, match="frozen file is missing"):
         se.load_near_misses(tmp_path / "absent.jsonl", [])
@@ -165,7 +166,7 @@ def test_paraphrase_checks_exclude_false_ignore_null_and_reject_strangers(tmp_pa
     assert checks["undecided"] == 1 and len(checks["keys"]) == 3
     stranger = row(9, True)
     path = write_jsonl(tmp_path / "d.jsonl", [row(0, True), stranger])
-    with pytest.raises(ValueError, match=f"{path}:2: .*not a true pair"):
+    with pytest.raises(ValueError, match=re.escape(f"{path}:2: ") + ".*not a true pair"):
         se.load_paraphrase_checks(path, pairs)
 
 

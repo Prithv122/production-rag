@@ -875,7 +875,7 @@ README's cache audit), 119 of the 368 are not phrased as questions, and only 30
 are spot-checked for intent drift, so `hit_rate` is measured on paraphrases a user would not
 type.
 
-## Semantic cache: harness built, not yet measured (2026-10-03)
+## Semantic cache: harness built, not yet measured (2026-10-04)
 
 The README argues caching is a win without measuring a semantic cache. The extra risk is a false
 hit: a question that reads like a cached one but needs a different answer (`read_parquet` against
