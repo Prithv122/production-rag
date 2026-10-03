@@ -807,3 +807,70 @@ Not done, by decision: no 40k / 60k / 80k sweep, no full rerun, no change to `de
 "exact, not ANN" docstring still holds at this size). The fast-suite count in `GUIDELINES.md`
 ("365 fast + 18 slow") was stale once the harness landed; it now reads 387 with the `ann` extra,
 375 without.
+
+## Semantic cache: pre-registered rule and frozen near-miss set (2026-10-04)
+
+Written before any similarity score was computed, so neither the rule nor the false-hit cases
+can be tuned to a result.
+
+**The rule, fixed 2026-09-30.** Sweep the threshold over 0.70 to 0.99 in steps of 0.01 and
+recommend the lowest one where all three hold: `false_hit_rate` <= 0.02, `wrong_entry_rate`
+<= 0.02 and `hit_rate` >= 0.10. If none qualifies, nothing ships, and that is a publishable
+result. The three rates, exactly:
+
+- `hit_rate` = correct hits / n_true, where a correct hit is a true pair whose top-1 cached
+  question is its own original and whose similarity is at least the threshold.
+- `wrong_entry_rate` = wrong-entry hits / n_true, where a wrong-entry hit is a true pair whose
+  top-1 is a different cached question at or above the threshold.
+- `false_hit_rate` = near-miss rows scoring at or above the threshold, whichever entry they
+  hit / n_near_miss.
+
+A hit that returns a different cached question's answer is a false hit, which is why
+wrong-entry hits are held to the same 0.02. `n_true` is counted after the paraphrase
+spot-check removes any pair judged to have a different intent. The decision uses point
+estimates; Wilson 95% upper bounds are reported beside them.
+
+**Conditions for a verdict that counts.** The recommendation is only valid for the committed
+`eval/near_miss.jsonl` (sha256 below), the committed questions and rewrite bundle, the
+default `BAAI/bge-small-en-v1.5` query embedder, the full 0.70 to 0.99 grid, and a paraphrase
+check file that holds the 30 seeded sample rows, each decided. A run with any of these
+changed is a diagnostic and reports no recommendation.
+
+**What the rule can and cannot show.** With 40 near-misses the 0.02 bar means zero false
+hits, since one is already 0.025. Zero in 40 leaves a Wilson 95% upper bound of about 0.088,
+so a pass is "none observed in 40", never "the false-hit rate is under 2%". With 368 true
+pairs, at most 7 wrong-entry hits pass (8 is 0.0217), and fewer pairs make that stricter.
+
+**The near-miss set.** `eval/near_miss.jsonl` has 40 rows, sha256
+`43a5189c68b27d5d3d0de741b17db12f5c1efc3574dbf95f0d266fa03b54fbe7`. Each anchor is a
+verbatim question from `eval/questions.jsonl` (15 DuckDB, 12 dbt, 12 Dagster and 1 that spans
+two tools; 18 accepted and 22 unverified). Most near-misses change one thing that changes the
+answer: a function, a parameter, a scope, an operation, a negation, a tool or a plan; a few
+change a clause. Kinds: 9 term swaps, 8 parameter swaps, 5 each of operation and scope
+swaps, 4 function swaps, 2 each of negations and tool swaps, and one each of language, command, plan,
+intent and out-of-corpus. No near-miss is itself a corpus question. A first draft was checked against the
+corpus before any scoring, and five rows whose answer a sibling corpus question already gave
+were replaced. A second pass against the corpus text replaced four more: an adapter swap whose
+target doc states no answer, a vague avoid/do pair, a ref/source pair that share one technique,
+and a pair whose anchor evidence already covered the near-miss. Each replacement has a
+documented answer in the corpus, so a wrong hit is wrong against the docs: the ECS execution role
+(`dagster/deployment/dagster-plus/hybrid/amazon-ecs/configuration-reference`), the notebook asset's
+`group_name` (`dagster/integrations/libraries/jupyter/using-notebooks-with-dagster`) and the
+incident.io header value (`dagster/guides/labs/webhook-alerts/webhooks-incidentio`:
+`Bearer`, against Jira's `Basic`). The Slack row (nm-038) is
+documented only as a commented example webhook URL in `dagster/integrations/libraries/apprise`.
+The one out-of-corpus row is nm-039 (MongoDB, which appears in the corpus only in an unrelated
+Upsolver config page). The file is frozen: any later edit is a new file with the old result kept.
+
+**Limits, stated now.** All 40 are in-domain and most differ by a single swapped term, which
+is the hardest kind for an embedding but not the only way a cache fails. Only one is
+out-of-corpus. Some near-misses sit in the same documentation section as their anchor, so
+a hit can be partly right; the rule still counts it as false. 148 of the 184 questions share
+an evidence document with another question, and about ten pairs are near-duplicates with the
+same answer. A variant whose top-1 is such a sibling is a wrong-entry hit under the rule, so
+the corpus itself can fail `wrong_entry_rate`; the sweep reports how many wrong-entry hits
+share an evidence document, as a diagnostic that does not change the verdict. The true pairs
+were all written by the local fallback model, not the one the cache key names (see the
+README's cache audit), 119 of the 368 are not phrased as questions, and only 30
+are spot-checked for intent drift, so `hit_rate` is measured on paraphrases a user would not
+type.
