@@ -903,3 +903,13 @@ writes its template). Any run that departs from the conditions above is a diagno
 
 **No numbers exist yet.** The only runs so far used a hashing embedder to check the wiring. The
 README is unchanged until the sweep has been run on the owner's machine.
+
+## Replay check at the semantic-cache merge (2026-10-04)
+
+Ran `answer-eval --subset 60 --replay` on the commit before the merge and on the commit after it;
+the outputs match on every field except wall-clock timings, so the merge does not move replay.
+Both differ from the committed `eval/results/answers.json` in two fields, and that drift predates
+this work: the `ollama-llama-3b` rows for `q0035-duckdb-conceptual` and `q0155-dbt-exact_term`
+read `unparseable` in the committed file and `truncated` on replay. Both labels are transient
+failures and no summary figure differs. Which commit changed the label was not isolated, and the
+committed file was left as published.
