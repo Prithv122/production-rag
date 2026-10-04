@@ -954,3 +954,77 @@ model rewrites. The frozen files stay as they are, and any new near-miss set is 
 **Deferred from the merge review, still open:** gaps in the CLI's exception handling, how
 duplicate true pairs are handled, recording library versions and the model snapshot in `config`,
 and a few extra tests. None of them changes this result.
+
+## pgvector: adapter built, not yet measured (2026-10-04)
+
+The FAISS comparison left one question open: does pgvector, the way most teams would add a
+vector index to an existing Postgres, meet the same bar? `ann-bench` now takes
+`--index pgvector-hnsw` and `--index pgvector-ivfflat` (`PgVectorIndex` in `ann.py`, optional
+`pgvector` extra, `pgvector.compose.yml` for a throwaway local server). They are opt-in: the
+default index list is unchanged, so a plain `ann-bench` still needs no database.
+
+**The rule, pre-registered by the owner on 2026-10-04 and fixed before any pgvector
+measurement.** Same 184 questions, k = 10, exact numpy as ground truth. The latency budget is
+the 10% line from the earlier rule applied to the measured end-to-end p95 of 164.5 ms, so
+**16.45 ms p95**. HNSW `m=32`, `ef_construction=200`, `ef_search` 16/32/64/128/256; IVFFlat
+`lists = default_nlist(n)`, `probes` 1/4/16/64. Reported per configuration: recall@10 against
+exact, p50/p95 per query, build time, index and table size, and a bare `SELECT 1` p95 taken
+right after each configuration's searches, so the database hop is visible on its own.
+**Pass:** some single configuration has recall@10 >= 0.98 *and* p95 <= 16.45 ms. Exact numpy
+stays the default at 22,789 vectors whatever the result: pgvector is being tested as the
+scale-up path.
+
+**What a result may say.** A pass reads "pgvector qualifies as a retrieval backend under the
+pre-registered current-app latency and recall budget"; a fail reads "did not meet the
+pre-registered latency and recall budget at the current scale". Neither says the backend fits
+the application: the run uses one process on one connection and does not exercise connection
+pooling, concurrent users, writes or a hosted Postgres.
+
+The budget in the verdict is the pinned 16.45 ms (10% of 164.5 ms), not re-derived from the run's
+own end-to-end timing, which varies and would let the line drift. The statement is written only
+when the run matches the registered protocol: the real index, k = 10, all 184 questions, the
+registered sweep grids, and both pgvector kinds measured. Otherwise it is null and
+`statement_withheld` lists why (a synthetic run, `-k 5`, `--verified-only` and a subset of the
+indexes all land here). The per-configuration numbers are still reported.
+
+**Measurement integrity.** One sweep at a time. While the real run is in progress the repo
+environment is frozen (no dependency sync, no edits) and nothing else runs on the machine. The
+earlier FAISS sweep could not rule out an overlapping process, which is why this is stated up
+front, and why the parts that can be enforced in code are:
+- The output defaults to `eval/results/ann_pgvector.json`. A pgvector run refuses to write
+  `ann.json` at all, even with `--overwrite`.
+- Any run aimed at `ann_pgvector.json` stops if it already exists unless `--overwrite` is given,
+  and the final write is exclusive, so a file that appears during a long sweep is never replaced;
+  the finished numbers are kept beside it under a new name.
+- Each pgvector kind takes a session advisory lock on its scratch table, so a second run against
+  the same tables fails instead of rebuilding them under the first. The tests use their own
+  table prefix, so running them during a sweep does not touch the measured tables.
+
+**Design choices, so they are not mistaken for tuning.**
+- Scoring is inner product on unit vectors (`<#>`, negated back to a similarity), which equals
+  cosine, as in the FAISS and numpy indexes.
+- `build_s` times `CREATE INDEX` only. The heap load is reported separately as `load_s`.
+- Index builds run with `max_parallel_maintenance_workers = 0` and `maintenance_work_mem =
+  512MB`, to compare against FAISS's single thread without the HNSW graph spilling. Both are
+  recorded in the result, with the Postgres and pgvector versions.
+- The planner is told `enable_seqscan = off` and `enable_sort = off`, because on a table this
+  small it could otherwise answer exactly from the primary key and skip the index being measured.
+  Prepared statements are off, so each query is planned fresh the way `EXPLAIN` plans it. The plan
+  is re-checked whenever `ef_search` or `probes` changes (IVFFlat's planner cost moves with
+  `probes`) and again after each configuration's timings; a configuration whose plan does not use
+  the index raises, so no row is produced for it. Each row records `plan_uses_index`, and the
+  result records the settings read back from the server.
+- The query vector travels as text, so formatting it is part of the measured per-query cost.
+  That is what a plain Postgres client pays.
+- A sweep over `ef_search` and `probes` re-tunes one built index in place, as the FAISS rows do.
+
+**Known risk to the reading, not a change to the rule.** The server runs in a container and is
+reached over a published port, so the round trip includes the container runtime's port forwarding.
+In throwaway runs on tiny synthetic data (1,500 vectors, 20 queries) the `SELECT 1` p95 moved
+between a few milliseconds and tens of milliseconds from one configuration to the next. Those runs
+are not results and are not recorded. If the real run shows the same, the `SELECT 1` column is how
+a reader tells overhead from search cost, and a verdict that turns on it is reported with that
+caveat rather than re-run until it passes.
+
+**No numbers exist yet.** Everything above is the instrument and the rule. The README is
+unchanged until the real run.

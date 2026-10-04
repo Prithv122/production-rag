@@ -22,6 +22,9 @@ embed = [
 ann = [
     "faiss-cpu>=1.15",
 ]
+pgvector = [
+    "psycopg[binary]>=3.2",
+]
 
 [build-system]
 requires = ["hatchling"]

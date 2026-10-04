@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -696,14 +697,34 @@ def cmd_ann_bench(args: argparse.Namespace) -> int:
     from . import ann
 
     kinds = [i for i in (args.index or ["exact", *ann.FAISS_KINDS]) if i != "exact"]
+    uses_pgvector = any(kind in ann.PGVECTOR_KINDS for kind in kinds)
+    # A pgvector run must never land on the FAISS result file, nor silently replace a
+    # finished pgvector one: the rule was fixed before the run, and the file is its record.
+    out = args.out or Path(
+        "eval/results/ann_pgvector.json" if uses_pgvector else "eval/results/ann.json"
+    )
+    if uses_pgvector and out.name == "ann.json":
+        print("ann-bench: a pgvector run never writes ann.json, the FAISS record", file=sys.stderr)
+        return 1
+    protected = uses_pgvector or out.name == "ann_pgvector.json"
+    if protected and out.exists() and not args.overwrite:
+        print(f"ann-bench: {out} already exists; pass --overwrite to replace it", file=sys.stderr)
+        return 1
     e2e, source = args.e2e_p95_ms, "flag" if args.e2e_p95_ms is not None else None
     try:
-        if kinds:
+        if any(kind not in ann.PGVECTOR_KINDS for kind in kinds):
             ann._faiss()  # fail before loading anything heavy
+        if uses_pgvector:
+            ann._psycopg()
         if e2e is None and args.e2e_from is not None:
             e2e, source = ann.read_e2e_p95(args.e2e_from), f"file:{args.e2e_from}"
         common = dict(
-            kinds=kinds, k=args.k, repeats=args.repeats, e2e_p95_ms=e2e, e2e_source=source
+            kinds=kinds,
+            k=args.k,
+            repeats=args.repeats,
+            e2e_p95_ms=e2e,
+            e2e_source=source,
+            dsn=args.dsn or os.environ.get("PGVECTOR_DSN") or ann.PGVECTOR_DEFAULT_DSN,
         )
         if args.synthetic:
             result = ann.run_bench(
@@ -733,14 +754,38 @@ def cmd_ann_bench(args: argparse.Namespace) -> int:
                 seed=args.seed,
                 **common,
             )
-    except (ModuleNotFoundError, OSError, ValueError) as exc:
+    except (ModuleNotFoundError, OSError, ValueError, RuntimeError) as exc:
         print(f"ann-bench: {exc}", file=sys.stderr)
         return 1
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    written = _write_result(
+        out, json.dumps(result, indent=2), exclusive=protected and not args.overwrite
+    )
     print(ann.format_table(result))
-    print(f"\nwrote {args.out}")
+    print(f"\nwrote {written}")
     return 0
+
+
+def _write_result(out: Path, text: str, *, exclusive: bool) -> Path:
+    """Write the result. With `exclusive`, never replace a file that appeared since start-up.
+
+    A long sweep can finish after another run has written the same path. The finished
+    numbers are kept next to it under a new name rather than lost or overwritten.
+    """
+    if not exclusive:
+        out.write_text(text, encoding="utf-8")
+        return out
+    try:
+        with open(out, "x", encoding="utf-8") as handle:
+            handle.write(text)
+        return out
+    except FileExistsError:
+        spare = out.with_name(f"{out.stem}.{os.getpid()}{out.suffix}")
+        spare.write_text(text, encoding="utf-8")
+        print(
+            f"ann-bench: {out} appeared during the run; kept this one as {spare}", file=sys.stderr
+        )
+        return spare
 
 
 # ---------------------------------------------------------------------------
@@ -1003,15 +1048,27 @@ def build_parser() -> argparse.ArgumentParser:
     ann_bench.add_argument(
         "--index",
         action="append",
-        choices=["exact", "flat", "hnsw", "ivf", "ivfpq"],
-        help="which indexes to measure (default all); exact is always the ground truth",
+        choices=["exact", "flat", "hnsw", "ivf", "ivfpq", "pgvector-hnsw", "pgvector-ivfflat"],
+        help="which indexes to measure (default: exact and the FAISS kinds; pgvector is opt-in); "
+        "exact is always the ground truth",
     )
     ann_bench.add_argument("-k", type=int, default=10)
     ann_bench.add_argument("--repeats", type=int, default=3)
     ann_bench.add_argument("--seed", type=int, default=20260930)
     ann_bench.add_argument("--e2e-p95-ms", type=float, help="end-to-end p95 denominator override")
     ann_bench.add_argument("--e2e-from", type=Path, help="read config.e2e_p95_ms from a prior run")
-    ann_bench.add_argument("--out", type=Path, default=Path("eval/results/ann.json"))
+    ann_bench.add_argument(
+        "--out",
+        type=Path,
+        help="result file (default eval/results/ann.json; ann_pgvector.json with a pgvector index)",
+    )
+    ann_bench.add_argument(
+        "--dsn",
+        help="Postgres DSN for the pgvector indexes (default: $PGVECTOR_DSN, then localhost:5433)",
+    )
+    ann_bench.add_argument(
+        "--overwrite", action="store_true", help="replace an existing pgvector result file"
+    )
     _add_component_args(ann_bench)
     ann_bench.set_defaults(func=cmd_ann_bench)
 

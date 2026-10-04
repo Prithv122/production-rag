@@ -44,10 +44,25 @@ jobs:
       - name: Test
         run: uv run pytest -m "not slow" --cov=src --cov-report=term-missing
 
-  # Separate from `test` on purpose: the fast job must stay torch-free and
-  # faiss-free, and without this job the faiss tests would only ever be skipped in CI.
+  # Separate from `test` on purpose: the fast job must stay torch-free, faiss-free and
+  # database-free, and without this job the faiss and pgvector tests would only ever be
+  # skipped in CI.
   ann:
     runs-on: ubuntu-latest
+    services:
+      pgvector:
+        image: pgvector/pgvector:0.8.1-pg17
+        ports:
+          - 5433:5432
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      PGVECTOR_DSN: postgresql://postgres@127.0.0.1:5433/postgres
     steps:
       - uses: actions/checkout@v4
 
@@ -59,8 +74,8 @@ jobs:
       - name: Set up Python
         run: uv python install
 
-      - name: Install dependencies (ann extra, still no torch)
-        run: uv sync --all-groups --extra ann
+      - name: Install dependencies (ann and pgvector extras, still no torch)
+        run: uv sync --all-groups --extra ann --extra pgvector
 
       - name: Assert torch is absent
         run: |
@@ -70,4 +85,4 @@ jobs:
           fi
 
       - name: Test
-        run: uv run pytest -m "not slow" -q tests/test_ann.py
+        run: uv run pytest -m "not slow" -q tests/test_ann.py tests/test_pgvector.py

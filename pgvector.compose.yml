@@ -1,0 +1,20 @@
+# Throwaway Postgres + pgvector for the ann-bench pgvector indexes. Not part of the
+# app: nothing in the retrieval or serving path reads it.
+#
+#   docker compose -f pgvector.compose.yml up -d --wait
+#   export PGVECTOR_DSN=postgresql://postgres@127.0.0.1:5433/postgres
+#
+# Bound to loopback only and trust-authenticated, because it holds nothing but
+# synthetic copies of the corpus vectors. No volume: `down` discards the data.
+services:
+  pgvector:
+    image: pgvector/pgvector:0.8.1-pg17
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
