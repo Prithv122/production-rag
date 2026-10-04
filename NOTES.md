@@ -1069,3 +1069,35 @@ current-app latency and recall budget. No IVFFlat setting reaches 0.98 (best 0.9
   in the minutes before the run); no model server was.
 - The first launch of this run failed in 2 seconds, before any measurement, because the command lacked
   the `embed` extra; nothing was written. The environment was then synced and the run made once.
+
+## pgvector: quiet-machine replication, rule fixed before it runs (2026-10-04)
+
+The run above is kept exactly as written (`eval/results/ann_pgvector.json`, sha256
+`73ae7433ead596c38caee68b4084716613f57a9ae2dee3877b1fcc58a81c590d`). It is a **noisy-machine run**:
+background CPU was 40 to 70% before it, which the measurement-integrity rule above does not allow
+for the registered measurement. It is disclosed, not replaced, and not overwritten.
+
+**What this is, and is not.** A replication protocol, prompted by environmental noise in the first
+run. It is not a change to the original experiment: the recall floor (0.98), the budget (16.45 ms
+p95), the question set, the grids and the code are exactly those of the first run, and the first
+result is neither edited nor withdrawn. This section was written and committed before the
+replication was started, and the gate below is the only thing that decides whether it starts.
+
+**Quiet-machine gate, fixed before the replication is measured.** Sample total CPU once a second for
+30 seconds (`\Processor(_Total)\% Processor Time`). The run starts only if the **mean is below 15%
+and the maximum is below 40%**, and no `llama-server` process exists. A failed gate means no run;
+it is re-checked later, and the benchmark is never started to see what happens. CPU is also logged
+every 2 seconds during the run, as a description of the conditions and not as a second gate.
+
+**Replication protocol.** One run, the same registered protocol as above (22,789 vectors, 184
+questions, k = 10, exact numpy as ground truth, budget pinned at 16.45 ms p95, the same grids, same
+container image, `--e2e-from eval/results/ann.json`), written to
+`eval/results/ann_pgvector_quiet.json`. No sweep is re-run to improve a number.
+
+**Comparison, fixed before it runs.** Per configuration: recall@10 difference, p50 and p95 ratio
+(quiet over noisy) and `SELECT 1` p95. Then the registered verdict from each file side by side, with
+the passing configurations listed. Recall should be equal, because it does not depend on load, and a
+difference in it is reported as a difference; a change in recall of more than 0.005 on any
+configuration is investigated before the replication is interpreted, not simply accepted. If the two verdicts disagree, both are stated, and the
+quiet run is the registered measurement. The quiet run is the one a README may quote; the noisy run
+is mentioned only as disclosed context.
