@@ -1,0 +1,349 @@
+{
+  "config": {
+    "mode": "real",
+    "strategy": "heading",
+    "dim": 384,
+    "k": 10,
+    "seed": 20260930,
+    "repeats": 3,
+    "n_queries": 184,
+    "n": [
+      22789
+    ],
+    "indexes": [
+      "exact",
+      "pgvector-hnsw",
+      "pgvector-ivfflat"
+    ],
+    "sweep": {
+      "hnsw_ef_search": [
+        16,
+        32,
+        64,
+        128,
+        256
+      ],
+      "nprobe": [
+        1,
+        4,
+        16,
+        64
+      ]
+    },
+    "thread_env": {
+      "OMP_NUM_THREADS": null,
+      "OPENBLAS_NUM_THREADS": null,
+      "MKL_NUM_THREADS": null
+    },
+    "faiss_threads": null,
+    "versions": {
+      "numpy": "2.5.3",
+      "faiss": null
+    },
+    "e2e_p95_ms": 164.50630000326782,
+    "e2e_source": "file:eval\\results\\ann.json",
+    "rule": "exact_p95 <= 0.10 * e2e_p95",
+    "rule_pre_registered": "2026-09-30",
+    "pgvector": {
+      "postgres": "17.8 (Debian 17.8-1.pgdg12+1)",
+      "pgvector": "0.8.1",
+      "settings": {
+        "shared_buffers": "128MB",
+        "maintenance_work_mem": "512MB",
+        "max_parallel_maintenance_workers": "0",
+        "enable_seqscan": "off",
+        "enable_sort": "off",
+        "hnsw.iterative_scan": "off",
+        "ivfflat.iterative_scan": "off",
+        "hnsw.ef_search": "16",
+        "ivfflat.probes": "1"
+      },
+      "prepared_statements": false
+    },
+    "pgvector_rule": "some pgvector config: recall@10 vs exact >= 0.98 and p95 <= 0.10 * e2e_p95",
+    "pgvector_rule_pre_registered": "2026-10-04"
+  },
+  "rows": [
+    {
+      "n": 22789,
+      "index": "exact",
+      "params": {},
+      "build_s": null,
+      "index_bytes": 35003904,
+      "p50_ms": 1.8115000566467643,
+      "p95_ms": 2.7805001009255648,
+      "recall_at_10_vs_exact": 1.0,
+      "e2e": {
+        "recall@5": 0.5550847457627118,
+        "ndcg@10": 0.4993353013666508,
+        "n_scored": 177
+      }
+    },
+    {
+      "n": 22789,
+      "index": "pgvector-hnsw",
+      "params": {
+        "M": 32,
+        "ef_construction": 200,
+        "ef_search": 16
+      },
+      "build_s": 53.16890399996191,
+      "index_bytes": 45350912,
+      "p50_ms": 2.8466000221669674,
+      "p95_ms": 4.643399966880679,
+      "recall_at_10_vs_exact": 0.9597826086956521,
+      "table_bytes": 37486592,
+      "load_s": 7.241111999959685,
+      "select1_p50_ms": 1.0460999328643084,
+      "select1_p95_ms": 1.9989999709650874,
+      "plan_uses_index": true,
+      "e2e": {
+        "recall@5": 0.5494350282485876,
+        "ndcg@10": 0.4973949947019664,
+        "n_scored": 177
+      }
+    },
+    {
+      "n": 22789,
+      "index": "pgvector-hnsw",
+      "params": {
+        "M": 32,
+        "ef_construction": 200,
+        "ef_search": 32
+      },
+      "build_s": 53.16890399996191,
+      "index_bytes": 45350912,
+      "p50_ms": 3.064400050789118,
+      "p95_ms": 4.8698999453336,
+      "recall_at_10_vs_exact": 0.9853260869565218,
+      "table_bytes": 37486592,
+      "load_s": 7.241111999959685,
+      "select1_p50_ms": 1.1012000031769276,
+      "select1_p95_ms": 2.127200015820563,
+      "plan_uses_index": true,
+      "e2e": {
+        "recall@5": 0.5494350282485876,
+        "ndcg@10": 0.4956266604363727,
+        "n_scored": 177
+      }
+    },
+    {
+      "n": 22789,
+      "index": "pgvector-hnsw",
+      "params": {
+        "M": 32,
+        "ef_construction": 200,
+        "ef_search": 64
+      },
+      "build_s": 53.16890399996191,
+      "index_bytes": 45350912,
+      "p50_ms": 3.763500018976629,
+      "p95_ms": 5.74259995482862,
+      "recall_at_10_vs_exact": 0.9951086956521739,
+      "table_bytes": 37486592,
+      "load_s": 7.241111999959685,
+      "select1_p50_ms": 1.3177000219002366,
+      "select1_p95_ms": 2.7405000291764736,
+      "plan_uses_index": true,
+      "e2e": {
+        "recall@5": 0.5550847457627118,
+        "ndcg@10": 0.49919123531530757,
+        "n_scored": 177
+      }
+    },
+    {
+      "n": 22789,
+      "index": "pgvector-hnsw",
+      "params": {
+        "M": 32,
+        "ef_construction": 200,
+        "ef_search": 128
+      },
+      "build_s": 53.16890399996191,
+      "index_bytes": 45350912,
+      "p50_ms": 6.246100063435733,
+      "p95_ms": 10.305400006473064,
+      "recall_at_10_vs_exact": 0.9983695652173913,
+      "table_bytes": 37486592,
+      "load_s": 7.241111999959685,
+      "select1_p50_ms": 1.3660999247804284,
+      "select1_p95_ms": 2.658399986103177,
+      "plan_uses_index": true,
+      "e2e": {
+        "recall@5": 0.5550847457627118,
+        "ndcg@10": 0.4989436435026587,
+        "n_scored": 177
+      }
+    },
+    {
+      "n": 22789,
+      "index": "pgvector-hnsw",
+      "params": {
+        "M": 32,
+        "ef_construction": 200,
+        "ef_search": 256
+      },
+      "build_s": 53.16890399996191,
+      "index_bytes": 45350912,
+      "p50_ms": 7.401300012134016,
+      "p95_ms": 12.183699989691377,
+      "recall_at_10_vs_exact": 0.9994565217391305,
+      "table_bytes": 37486592,
+      "load_s": 7.241111999959685,
+      "select1_p50_ms": 1.2815999798476696,
+      "select1_p95_ms": 3.625099896453321,
+      "plan_uses_index": true,
+      "e2e": {
+        "recall@5": 0.5550847457627118,
+        "ndcg@10": 0.4989436435026587,
+        "n_scored": 177
+      }
+    },
+    {
+      "n": 22789,
+      "index": "pgvector-ivfflat",
+      "params": {
+        "nlist": 584,
+        "nprobe": 1
+      },
+      "build_s": 11.584441299899481,
+      "index_bytes": 40165376,
+      "p50_ms": 2.412599977105856,
+      "p95_ms": 3.949600039049983,
+      "recall_at_10_vs_exact": 0.38423913043478264,
+      "table_bytes": 37486592,
+      "load_s": 7.952823199913837,
+      "select1_p50_ms": 1.2255999026820064,
+      "select1_p95_ms": 2.2609999869018793,
+      "plan_uses_index": true,
+      "e2e": {
+        "recall@5": 0.2457627118644068,
+        "ndcg@10": 0.21839767992256565,
+        "n_scored": 177
+      }
+    },
+    {
+      "n": 22789,
+      "index": "pgvector-ivfflat",
+      "params": {
+        "nlist": 584,
+        "nprobe": 4
+      },
+      "build_s": 11.584441299899481,
+      "index_bytes": 40165376,
+      "p50_ms": 2.257999964058399,
+      "p95_ms": 3.5833000438287854,
+      "recall_at_10_vs_exact": 0.6358695652173914,
+      "table_bytes": 37486592,
+      "load_s": 7.952823199913837,
+      "select1_p50_ms": 1.1757999891415238,
+      "select1_p95_ms": 2.3222999880090356,
+      "plan_uses_index": true,
+      "e2e": {
+        "recall@5": 0.384180790960452,
+        "ndcg@10": 0.34189140164638965,
+        "n_scored": 177
+      }
+    },
+    {
+      "n": 22789,
+      "index": "pgvector-ivfflat",
+      "params": {
+        "nlist": 584,
+        "nprobe": 16
+      },
+      "build_s": 11.584441299899481,
+      "index_bytes": 40165376,
+      "p50_ms": 2.5539000052958727,
+      "p95_ms": 4.036300000734627,
+      "recall_at_10_vs_exact": 0.8402173913043478,
+      "table_bytes": 37486592,
+      "load_s": 7.952823199913837,
+      "select1_p50_ms": 1.1036000214517117,
+      "select1_p95_ms": 2.123200101777911,
+      "plan_uses_index": true,
+      "e2e": {
+        "recall@5": 0.4915254237288136,
+        "ndcg@10": 0.43069645970417386,
+        "n_scored": 177
+      }
+    },
+    {
+      "n": 22789,
+      "index": "pgvector-ivfflat",
+      "params": {
+        "nlist": 584,
+        "nprobe": 64
+      },
+      "build_s": 11.584441299899481,
+      "index_bytes": 40165376,
+      "p50_ms": 4.127399995923042,
+      "p95_ms": 6.650600000284612,
+      "recall_at_10_vs_exact": 0.9554347826086957,
+      "table_bytes": 37486592,
+      "load_s": 7.952823199913837,
+      "select1_p50_ms": 0.9799000108614564,
+      "select1_p95_ms": 1.9013999262824655,
+      "plan_uses_index": true,
+      "e2e": {
+        "recall@5": 0.5268361581920904,
+        "ndcg@10": 0.47331588748874603,
+        "n_scored": 177
+      }
+    }
+  ],
+  "verdicts": [
+    {
+      "n": 22789,
+      "exact_p95_ms": 2.7805001009255648,
+      "e2e_p95_ms": 164.50630000326782,
+      "exact_share": 0.016902088861462033,
+      "exact_enough": true
+    }
+  ],
+  "pgvector_verdicts": [
+    {
+      "n": 22789,
+      "budget_p95_ms": 16.45,
+      "budget_source": "pinned: 0.10 x 164.5 ms",
+      "recall_floor": 0.98,
+      "qualifies": true,
+      "passing_configs": [
+        {
+          "index": "pgvector-hnsw",
+          "params": {
+            "M": 32,
+            "ef_construction": 200,
+            "ef_search": 32
+          }
+        },
+        {
+          "index": "pgvector-hnsw",
+          "params": {
+            "M": 32,
+            "ef_construction": 200,
+            "ef_search": 64
+          }
+        },
+        {
+          "index": "pgvector-hnsw",
+          "params": {
+            "M": 32,
+            "ef_construction": 200,
+            "ef_search": 128
+          }
+        },
+        {
+          "index": "pgvector-hnsw",
+          "params": {
+            "M": 32,
+            "ef_construction": 200,
+            "ef_search": 256
+          }
+        }
+      ],
+      "statement": "pgvector qualifies as a retrieval backend under the pre-registered current-app latency and recall budget.",
+      "statement_withheld": []
+    }
+  ]
+}

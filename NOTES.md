@@ -1028,3 +1028,44 @@ caveat rather than re-run until it passes.
 
 **No numbers exist yet.** Everything above is the instrument and the rule. The README is
 unchanged until the real run.
+
+## pgvector: result (2026-10-04)
+
+One run of the registered sweep, `eval/results/ann_pgvector.json`: 22,789 vectors, the same 184
+questions, k = 10, exact numpy as ground truth, budget pinned at 16.45 ms p95, Postgres 17.8 with
+pgvector 0.8.1 in a Docker Desktop container on loopback. Every configuration's plan used the index
+(`plan_uses_index` true throughout).
+
+| index | setting | recall@10 | p50 ms | p95 ms | `SELECT 1` p95 ms |
+|---|---|---|---|---|---|
+| exact numpy | | 1.000 | 1.812 | 2.781 | |
+| pgvector HNSW | `ef_search` 16 | 0.960 | 2.847 | 4.643 | 1.999 |
+| pgvector HNSW | 32 | 0.985 | 3.064 | 4.870 | 2.127 |
+| pgvector HNSW | 64 | 0.995 | 3.764 | 5.743 | 2.741 |
+| pgvector HNSW | 128 | 0.998 | 6.246 | 10.305 | 2.658 |
+| pgvector HNSW | 256 | 0.999 | 7.401 | 12.184 | 3.625 |
+| pgvector IVFFlat | `probes` 1 | 0.384 | 2.413 | 3.950 | 2.261 |
+| pgvector IVFFlat | 4 | 0.636 | 2.258 | 3.583 | 2.322 |
+| pgvector IVFFlat | 16 | 0.840 | 2.554 | 4.036 | 2.123 |
+| pgvector IVFFlat | 64 | 0.955 | 4.127 | 6.651 | 1.901 |
+
+HNSW build 53.2 s (`CREATE INDEX` only), index 45.4 MB; IVFFlat build 11.6 s, index 40.2 MB; table
+37.5 MB; heap load about 7 to 8 s each.
+
+**Verdict, by the registered rule.** HNSW at `ef_search` 32, 64, 128 and 256 each reach recall@10
+>= 0.98 at p95 <= 16.45 ms, so pgvector qualifies as a retrieval backend under the pre-registered
+current-app latency and recall budget. No IVFFlat setting reaches 0.98 (best 0.955 at `probes` 64).
+
+**Reading it correctly.**
+- The container hop did not decide the verdict. The bare `SELECT 1` p95 stayed between 1.9 and 3.6 ms,
+  so the 16.45 ms line was not eaten by port forwarding; the worst passing p95 (12.2 ms) is still
+  under it. The earlier worry from tiny synthetic runs did not show up here.
+- Exact numpy is still faster at this size (2.8 ms p95 against 4.9 ms for the cheapest passing HNSW
+  setting) and stays the production default. pgvector is the scale-up path, not a replacement.
+- Retrieval quality downstream is unchanged within noise for the passing settings: r@5 0.549 to
+  0.555 and ndcg@10 0.496 to 0.499, against exact's 0.555 and 0.499.
+- One process, one connection, one machine. Connection pooling, concurrent users, writes and a hosted
+  Postgres are not measured. Other desktop software was running at background level (CPU 40 to 70%
+  in the minutes before the run); no model server was.
+- The first launch of this run failed in 2 seconds, before any measurement, because the command lacked
+  the `embed` extra; nothing was written. The environment was then synced and the run made once.
