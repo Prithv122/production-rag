@@ -51,7 +51,7 @@ path (**not** Pydantic — deviation reasoned in NOTES.md) · Gradio on **Google
 - [x] Graceful degradation to Ollama when the API is unavailable — and, after session 3,
       *disabled inside `answer-eval`*, because in a comparison between models it silently
       substitutes one for another. See NOTES.md.
-- [x] Ship gate passes — 387 fast (375 without the `ann` extra) + 18 slow tests, ruff clean, CI green
+- [x] Ship gate passes — 435 fast without the `ann` extra (plus 12 faiss tests with it) + 18 slow tests, ruff clean, CI green
 
 ## Project-specific notes
 

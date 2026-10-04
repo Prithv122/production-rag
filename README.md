@@ -246,6 +246,73 @@ denominator is also a single measurement, and §7 shows how much this machine's 
 between runs; the real-corpus verdict has a wide margin (2.6% against 10%), so it does not
 depend on the third decimal.
 
+### Semantic answer cache — measured, and not shipped
+
+A semantic cache answers a new question with a stored answer when the two questions embed
+close enough. A hit saves the whole retrieval-and-generation round trip. The risk is a *false
+hit*: a question that reads like a cached one but needs a different answer (`read_parquet`
+against `write_parquet`, "supports" against "does not support"). `production-rag
+semcache-sweep` measures that trade. The cache itself is built (`semcache.py`), sits in front
+of the exact LLM cache, and is bypassed on every `--replay` run. It is off by default and stays
+off, because no threshold passed.
+
+- **The rule was fixed before any similarity was computed (2026-09-30).** Sweep the threshold
+  from 0.70 to 0.99 in steps of 0.01 and ship the lowest one where all three hold: false-hit
+  rate on near-miss questions <= 0.02, wrong-entry rate (a paraphrase served a *different*
+  cached question's answer) <= 0.02, and hit rate on genuine paraphrases >= 0.10. If none
+  qualifies, nothing ships.
+- **True pairs:** each of the 184 eval questions against the two rewrites already committed
+  in the replay bundle, 368 pairs. A seeded sample of 30 was hand-checked for intent before
+  the sweep. 7 had drifted and were removed, leaving 361.
+- **False pairs:** 40 near-miss questions, written, frozen and hashed before any scoring. Each
+  is paired with a question that is in the cache, and most change one thing that changes the
+  answer: a function, a parameter, a scope, a tool or a negation.
+- Both sides go through the query encoder (`bge-small-en-v1.5`), and the lookup is top-1 over
+  all 184 cached questions.
+
+| Threshold | Correct hits (of 361) | Wrong-entry hits (of 361) | False hits (of 40) | Fails the rule on |
+|---:|---:|---:|---:|---|
+| 0.85 | 254 (0.704) | 13 (0.036) | 32 (0.800) | false hits, wrong entries |
+| 0.90 | 175 (0.485) | 6 (0.017) | 22 (0.550) | false hits |
+| 0.95 | 77 (0.213) | 2 (0.006) | 7 (0.175) | false hits |
+| 0.97 | 41 (0.114) | 0 | 2 (0.050) | false hits |
+| 0.98 | 25 (0.069) | 0 | 1 (0.025) | false hits, hit rate |
+| 0.99 | 6 (0.017) | 0 | 0 | hit rate |
+
+**Verdict: no threshold meets the rule, so nothing ships.** The false-hit condition passes at
+one of the 30 thresholds, 0.99, and there the cache answers 6 of 361 paraphrases, below the
+0.10 floor. At 0.97, the highest threshold still above the floor, 41 of 361 paraphrases hit
+with no wrong-entry hit, but 2 of the 40 near-misses are served their anchor's answer, at
+similarities of 0.981 and 0.975.
+
+**Why it fails: a near-miss clears the cutoff as often as a paraphrase does.** All 40 near-misses had
+their own anchor as their nearest cached question, at a median similarity of 0.902 (range
+0.788 to 0.981). At 24 of the 30 thresholds, every one from 0.70 to 0.94 except 0.91, a larger
+share of the near-misses clears the bar than of the genuine paraphrases hit their own
+original: at 0.90, 22 of 40 near-misses against 175 of 361 paraphrases. The paraphrases pull ahead for good only from 0.95,
+where fewer than a quarter of them hit. One similarity cutoff on this encoder cannot separate "same question, new words" from
+"same words, different question".
+
+**What these counts can and cannot say.**
+
+- Zero false hits in 40 still leaves a Wilson 95% upper bound of 0.088, so the 0.99 row reads
+  "none observed in 40", never "a false-hit rate under 2%". 40 near-misses give limited
+  precision in either direction.
+- Most near-misses are single-term swaps, the hardest case for an embedding, and only one is
+  out of corpus. A workload with fewer near-twin questions would see fewer false hits.
+- The paraphrases were written by the local 7B fallback model (see the cache-audit correction
+  under *Reranking and query rewriting*), and only 30 of them were hand-checked. Real users'
+  rephrasings may sit closer to or further from the original than these do.
+- 5 of the 6 wrong-entry hits at 0.90 land on a question that shares an evidence document with
+  the original, so some would have returned a partly right answer. The rule counts them as
+  wrong anyway.
+- One encoder, one run. This is a result for `bge-small-en-v1.5` used symmetrically on this
+  question set, not for semantic caching in general.
+
+The full sweep, with every near-miss's score, is in
+[eval/results/semcache.json](eval/results/semcache.json). The rule, the near-miss set and its
+limits are in [NOTES.md](NOTES.md).
+
 ### A worked example — illustrative, not a metric
 
 One real query against the built `heading` index, top 3 from each arm. The question
@@ -797,6 +864,15 @@ uv sync --extra embed --extra ann
 uv run production-rag ann-bench --indexes indexes --strategy heading --out eval/results/ann.json
 uv run production-rag ann-bench --synthetic --n 100000 --n 500000 --n 1000000 --dim 384 \
   --e2e-from eval/results/ann.json --out eval/results/ann_synthetic.json
+```
+
+The semantic-cache sweep needs only the query encoder, not the index. It reads the committed
+questions, the rewrite bundle, the frozen near-miss file and the hand-checked paraphrase
+sample, and writes one file. It is re-run rather than replayed, because it calls the encoder:
+
+```bash
+uv sync --extra embed
+uv run production-rag semcache-sweep --out eval/results/semcache.json
 ```
 
 **Verified, not asserted.** The answer table above was reproduced from a *fresh* cache built

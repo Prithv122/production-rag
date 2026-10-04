@@ -1,6 +1,6 @@
 # Interview Prep — production-rag
 
-**Seven questions, seven answers.** An unanswered question means this project is not shipped.
+**Nine questions, nine answers.** An unanswered question means this project is not shipped.
 
 If you can't answer one, you don't understand that part of your own project yet — go back and understand it. This file is the difference between a portfolio that survives a technical screen and one that collapses in it.
 
@@ -242,6 +242,35 @@ comment describing this exact failure. The answer path never got it.
 
 So the lesson I'd carry to another team isn't "add telemetry". It's that a field nothing reads
 isn't observability, and a lesson learned in one module isn't learned by the codebase.
+
+### Q9. You built a semantic cache and then didn't turn it on. Wasn't that wasted work?
+
+_A:_ No. The cache was never the deliverable. The deliverable was a decision about whether to
+turn it on, and that decision came out "no".
+
+A semantic cache serves a stored answer when a new question embeds close enough to a cached
+one. The saving is real, but so is the failure: "how do I use `read_parquet`" and "how do I use
+`write_parquet`" are nearly the same string and need different answers. So before computing a
+single similarity, I wrote the rule down. Sweep 0.70 to 0.99 and ship the lowest threshold
+with at most 2% false hits on near-miss questions, at most 2% of paraphrases served another
+question's answer, and at least a 10% hit rate. If none qualifies, ship nothing. I also froze
+40 near-miss questions and hashed the file, and hand-checked a sample of the paraphrases,
+committing those labels before the sweep ran.
+
+Nothing qualified. The only threshold with 0 false hits observed in 40 was 0.99, and there
+the cache answered 6 of 361 paraphrases. At 0.97 it answered 41 of 361 with no wrong-entry
+hits, but 2 of the 40 near-misses got their neighbour's answer. The more useful finding is
+the reason. All 40 near-misses had their own twin as nearest neighbour, at a median cosine of
+0.902, and at 24 of the 30 thresholds a larger share of near-misses cleared the bar than
+of real paraphrases hit their own original. One cutoff on this encoder can't tell a reworded question from a different
+question with the same words.
+
+I'm careful about how far that goes. Zero in 40 still leaves an upper bound near 9%, and the
+paraphrases came from a 7B rewriter, not from users. So the claim is "this encoder and cutoff
+on this question set don't clear the bar", not "semantic caching doesn't work". The next thing
+I'd try is a lexical guard: refuse a hit when the two questions differ in a code identifier or
+a negation. That would be its own pre-registered run, not a retune of this one. And without
+the rule written down first, I'd have been tempted to pick 0.97 and call 2 false hits in 40 fine.
 
 ---
 

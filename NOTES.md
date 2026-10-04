@@ -913,3 +913,44 @@ this work: the `ollama-llama-3b` rows for `q0035-duckdb-conceptual` and `q0155-d
 read `unparseable` in the committed file and `truncated` on replay. Both labels are transient
 failures and no summary figure differs. Which commit changed the label was not isolated, and the
 committed file was left as published.
+
+## Semantic cache: measured, no threshold qualifies (2026-10-04)
+
+The sweep ran once under the conditions in the pre-registered section above, so the verdict
+counts (`eligible` is true). Inputs: the frozen near-miss file (sha256 matches the pinned
+value), the committed questions and rewrite bundle, the default `bge-small-en-v1.5` encoder on
+CPU, the full 0.70 to 0.99 grid, and `eval/paraphrase_checks.jsonl` with all 30 seeded rows
+decided (23 same intent, 7 drifted). The checks file was committed in `aa7ae3e` before the sweep
+ran, so the denominator could not move after the results were seen. Result file:
+`eval/results/semcache.json`. Environment: torch 2.14.0+cpu, sentence-transformers 6.0.1, numpy
+2.5.3, model snapshot `5c38ec7c`. The harness records numpy only, so the rest are noted here.
+
+**Counts.** 368 true pairs, 361 after the 7 exclusions, and 40 near-misses against 184 cache
+entries.
+
+- The false-hit condition passes at one threshold of 30 (0.99), the wrong-entry condition at 10
+  (0.90 and up) and the hit-rate condition at 28 (0.97 and below). No threshold passes all three.
+- 0.99: 0 false hits observed in 40 (Wilson upper 0.088), 0 wrong-entry, 6 of 361 hits (0.017),
+  which is under the 0.10 floor.
+- 0.97, the highest threshold above the floor: 41 of 361 hits (0.114), 0 wrong-entry (upper
+  0.011), 2 false hits in 40 (0.050, upper 0.165): nm-018 at 0.981 and nm-024 at 0.975.
+- 0.98: 25 hits (0.069) and 1 false hit (nm-018), so it fails on two conditions.
+- All 40 near-misses had their own anchor as top-1, with a median score of 0.902 (0.788 to 0.981).
+  Wrong-entry hits mostly land on siblings that share evidence: 5 of 6 at 0.90, 11 of 13 at 0.85.
+
+**Interpretation.** `DEFAULT_THRESHOLD` stays None, the cache stays unwired, and the README
+reports the null. The failure is not a narrow miss on one condition. Near-misses clear the cutoff as
+often as the rewriter's paraphrases hit their own original: at 24 of 30 thresholds a larger
+share of near-misses clears it (counting correct hits only; 23 of 30 if wrong-entry hits are
+added to the paraphrase side). A cosine cutoff on this encoder does not separate the two. The
+limits written before the run all still apply. Most near-misses are single-term swaps, the
+paraphrases come from the 7B fallback, and only 30 were hand-checked.
+
+**Not tried, and each would be a new pre-registered run rather than a retune of this one.** A
+lexical guard on top of the cutoff (for example, refuse a hit when the two questions differ in a
+code identifier or a negation). A different or larger encoder. Real user rephrasings in place of
+model rewrites. The frozen files stay as they are, and any new near-miss set is a new file.
+
+**Deferred from the merge review, still open:** gaps in the CLI's exception handling, how
+duplicate true pairs are handled, recording library versions and the model snapshot in `config`,
+and a few extra tests. None of them changes this result.

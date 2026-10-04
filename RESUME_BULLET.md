@@ -32,6 +32,13 @@ Form: **action → technical specifics → measured outcome.** Numbers or it doe
   query over 22,789 chunks) and exact numpy cosine search (**1.07 ms**), rejecting FAISS/HNSW
   with a stated scale threshold rather than by default.
 
+- Pre-registered a ship rule for a semantic answer cache (<=2% false hits on near-miss
+  questions, <=2% wrong-entry hits, >=10% hit rate) and froze 40 near-miss questions before
+  computing any similarity. A 30-threshold sweep over 361 paraphrase pairs found no qualifying
+  threshold: the only one with **0 false hits observed in 40** answered **6 of 361**
+  paraphrases, because near-misses (mostly single-term swaps) cleared the cutoff as often as
+  genuine paraphrases hit their own original, at a median cosine of **0.902** to their cached twin. The cache shipped disabled.
+
 - Made every published number reproducible offline: LLM and cross-encoder responses ship as
   sorted JSONL bundles and `eval --replay` turns a cache miss into an error, verified with an
   empty API key and an unreachable local model server.
@@ -86,7 +93,8 @@ RAG · hybrid retrieval · BM25 (Okapi, implemented) · dense retrieval · sente
 bge-small-en-v1.5 · cross-encoder reranking · reciprocal rank fusion · score fusion ·
 query rewriting · retrieval evaluation (recall@k, nDCG, MRR, hit-rate) · ground-truth labelling ·
 chunking strategies · scipy sparse · numpy · OpenRouter · Ollama · provider abstraction ·
-fallback and graceful degradation · response caching and offline replay · citation grounding ·
+fallback and graceful degradation · response caching and offline replay · semantic caching
+(measured, not shipped) · pre-registered decision rules · Wilson intervals · citation grounding ·
 refusal/abstention evaluation · prompt engineering (measured) · bootstrap confidence intervals ·
 experiment provenance auditing · Gradio · Hugging Face Hub · Docker · Google Cloud Run ·
 Secret Manager · Artifact Registry · structured logging · production debugging ·

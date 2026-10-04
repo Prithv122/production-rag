@@ -31,8 +31,9 @@ import numpy as np
 from .dense import Embedder, l2_normalise
 from .providers import is_replaying
 
-# Stays None (cache disabled) until the owner commits a threshold measured by
-# `semcache-sweep`. Nothing else may set a default.
+# Stays None (cache disabled). The 2026-10-04 `semcache-sweep` found no threshold
+# meeting the pre-registered rule (NOTES.md). Only a later sweep that passes it may
+# set one, and nothing else may set a default.
 DEFAULT_THRESHOLD: float | None = None
 
 # Caching a failure serves it forever, which is the failure mode `is_replaying`'s
