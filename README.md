@@ -246,6 +246,56 @@ denominator is also a single measurement, and §7 shows how much this machine's 
 between runs; the real-corpus verdict has a wide margin (2.6% against 10%), so it does not
 depend on the third decimal.
 
+### pgvector — measured against the same budget
+
+The comparison above is in-process FAISS. The other common route is a vector index inside an
+existing Postgres, so `ann-bench` also takes `--index pgvector-hnsw` and `--index
+pgvector-ivfflat` (pgvector 0.8.1 on Postgres 17, in a local container; inner product on unit
+vectors, which equals cosine). It is opt-in, and the default run still needs no database.
+
+- **The rule was fixed before any pgvector number existed (2026-10-04).** Same 184 questions,
+  k = 10, exact numpy as ground truth. Pass if some single configuration reaches recall@10 >=
+  0.98 **and** p95 <= **16.45 ms**, which is 10% of the 164.5 ms end-to-end p95 above. The
+  budget is pinned in the code, so a run cannot re-derive it from its own timing.
+- **The latency includes the database hop.** Each query goes over a loopback connection with
+  the vector sent as text, planned fresh, so the figure is what a plain Postgres client pays.
+  A bare `SELECT 1` p95 is recorded next to every configuration to show how much of the
+  figure is the round trip. Each configuration's plan is checked to use the index, or the run
+  stops.
+- **One run, once.** The result is [eval/results/ann_pgvector.json](eval/results/ann_pgvector.json).
+
+Real `heading` index, 22,789 × 384:
+
+| Index | Setting | Recall@10 vs exact | p95 | `SELECT 1` p95 | Build | Index size |
+|---|---|---:|---:|---:|---:|---:|
+| exact (numpy) | | 1.000 | 2.78 ms | | — | 35.0 MB |
+| pgvector HNSW | `ef_search` 16 | 0.960 | 4.64 ms | 2.00 ms | 53.2 s | 45.4 MB |
+| pgvector HNSW | `ef_search` 32 | 0.985 | 4.87 ms | 2.13 ms | 53.2 s | 45.4 MB |
+| pgvector HNSW | `ef_search` 64 | 0.995 | 5.74 ms | 2.74 ms | 53.2 s | 45.4 MB |
+| pgvector HNSW | `ef_search` 256 | 0.999 | 12.18 ms | 3.63 ms | 53.2 s | 45.4 MB |
+| pgvector IVFFlat | `probes` 16 | 0.840 | 4.04 ms | 2.12 ms | 11.6 s | 40.2 MB |
+| pgvector IVFFlat | `probes` 64 | 0.955 | 6.65 ms | 1.90 ms | 11.6 s | 40.2 MB |
+
+HNSW uses M=32 and `ef_construction`=200; IVFFlat uses 584 lists. Every setting, including
+`ef_search` 128 and `probes` 1 and 4, is in the JSON file.
+
+**Verdict: pgvector HNSW qualifies under the registered retrieval criterion.** HNSW at
+`ef_search` 32, 64, 128 and 256 each reach recall@10 >= 0.98 within 16.45 ms p95; 32 is the
+lowest tested setting that does. IVFFlat never reaches 0.98 (best 0.955 at `probes` 64).
+
+What it does not say:
+
+- **Exact numpy stays the default.** At this size it is faster (2.78 ms p95 against 4.87 ms)
+  and has recall 1.0. pgvector was tested as the route to take when the corpus outgrows exact
+  search, and this run measured one corpus size only, so it says nothing about where the two
+  cross over.
+- **The container hop did not decide it.** `SELECT 1` p95 stayed between 1.9 and 3.6 ms, and the
+  slowest qualifying p95 (12.18 ms) is still inside the budget.
+- **It is one process on one connection on one machine**, with ordinary desktop software
+  running (no model server). Connection pooling, concurrent users, writes and a hosted Postgres
+  were not measured. Exact p95 here (2.78 ms) is lower than in the FAISS run (4.33 ms); the two
+  runs are separate and the spread is discussed in §7.
+
 ### Semantic answer cache — measured, and not shipped
 
 A semantic cache answers a new question with a stored answer when the two questions embed
@@ -866,6 +916,18 @@ uv run production-rag ann-bench --synthetic --n 100000 --n 500000 --n 1000000 --
   --e2e-from eval/results/ann.json --out eval/results/ann_synthetic.json
 ```
 
+The pgvector run needs a Postgres with pgvector (a throwaway one is in `pgvector.compose.yml`),
+the `pgvector` extra, and a quiet machine, because it is also timed. It writes
+`eval/results/ann_pgvector.json` once and refuses to overwrite it:
+
+```bash
+docker compose -f pgvector.compose.yml up -d --wait
+export PGVECTOR_DSN=postgresql://postgres@127.0.0.1:5433/postgres
+uv sync --extra embed --extra ann --extra pgvector
+uv run production-rag ann-bench --index exact --index pgvector-hnsw --index pgvector-ivfflat \
+  --e2e-from eval/results/ann.json
+```
+
 The semantic-cache sweep needs only the query encoder, not the index. It reads the committed
 questions, the rewrite bundle, the frozen near-miss file and the hand-checked paraphrase
 sample, and writes one file. It is re-run rather than replayed, because it calls the encoder:
@@ -939,6 +1001,11 @@ If the corpus does cross over, the approximate index is not free. In the same sw
 181 MB. At 1,000,000 it reached 0.917 at `ef_search` 128 (p95 2.06 ms) and 0.982 at 256
 (3.23 ms), with a 27-minute single-threaded build and 1.8 GB. Each of those is one run. The
 full sweep is in [eval/results/ann_synthetic.json](eval/results/ann_synthetic.json).
+
+For a Postgres-backed route, the real-index pgvector run (§5) puts HNSW at recall@10 0.985 and
+4.87 ms p95 at `ef_search` 32 and 0.995 at 5.74 ms at 64, inside the pre-registered budget.
+That makes HNSW in pgvector a qualified candidate for the scale-up path at 22,789 vectors. It
+was not run at larger sizes, so where it overtakes exact search is still unmeasured.
 
 **BM25's weight matrix stops fitting the rebuild model.** 1.1 M nonzeros becomes ~110 M;
 build time goes from 2.5 s to minutes, and the whole-index rebuild this project does on

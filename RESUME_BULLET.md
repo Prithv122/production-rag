@@ -32,6 +32,13 @@ Form: **action → technical specifics → measured outcome.** Numbers or it doe
   query over 22,789 chunks) and exact numpy cosine search (**1.07 ms**), rejecting FAISS/HNSW
   with a stated scale threshold rather than by default.
 
+- Pre-registered a pass rule for a pgvector backend (recall@10 >= 0.98 and p95 <= **16.45 ms**,
+  10% of the measured 164.5 ms end-to-end p95) before measuring, pinned it in code, and ran the
+  sweep once: HNSW reached **0.985 recall@10 at 4.87 ms p95** (`ef_search` 32) over a real
+  Postgres round trip, a bare `SELECT 1` held at 1.9-3.6 ms, and IVFFlat never passed (best
+  **0.955**). Exact numpy stayed the default: faster at 22,789 vectors (2.78 ms), with the
+  scale-up route measured at one size only.
+
 - Pre-registered a ship rule for a semantic answer cache (<=2% false hits on near-miss
   questions, <=2% wrong-entry hits, >=10% hit rate) and froze 40 near-miss questions before
   computing any similarity. A 30-threshold sweep over 361 paraphrase pairs found no qualifying
@@ -94,7 +101,7 @@ bge-small-en-v1.5 · cross-encoder reranking · reciprocal rank fusion · score 
 query rewriting · retrieval evaluation (recall@k, nDCG, MRR, hit-rate) · ground-truth labelling ·
 chunking strategies · scipy sparse · numpy · OpenRouter · Ollama · provider abstraction ·
 fallback and graceful degradation · response caching and offline replay · semantic caching
-(measured, not shipped) · pre-registered decision rules · Wilson intervals · citation grounding ·
+(measured, not shipped) · pgvector (HNSW, IVFFlat) · approximate nearest neighbour search · pre-registered decision rules · Wilson intervals · citation grounding ·
 refusal/abstention evaluation · prompt engineering (measured) · bootstrap confidence intervals ·
 experiment provenance auditing · Gradio · Hugging Face Hub · Docker · Google Cloud Run ·
 Secret Manager · Artifact Registry · structured logging · production debugging ·
