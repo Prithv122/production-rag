@@ -1101,3 +1101,71 @@ difference in it is reported as a difference; a change in recall of more than 0.
 configuration is investigated before the replication is interpreted, not simply accepted. If the two verdicts disagree, both are stated, and the
 quiet run is the registered measurement. The quiet run is the one a README may quote; the noisy run
 is mentioned only as disclosed context.
+
+
+## pgvector: quiet-machine replication, result (2026-10-04)
+
+Run once under the protocol above, after the gate passed on its fourth attempt (the first three
+attempts failed and nothing was started: mean/max CPU 24.5/49.2, 17.9/49.8 and 16.5/32.9 percent;
+the passing sample was **mean 9.9%, max 16.1%**, 30 one-second samples, no `llama-server`). Same
+commit as the first run's code (`0101fdc`, with only this file's text changed since), same container,
+same command apart from `--out`. Result: `eval/results/ann_pgvector_quiet.json`, sha256 `992c7497f090bea4144864ee71260f3a5dabc6c2d1fc74a0842e8912a98ee9ea`.
+The first result file is unchanged.
+
+CPU logged every 2 seconds during the run (55 samples, a description of conditions, not a gate):
+mean 22.0%, max 65.0%. That includes the benchmark itself (query encoding, one Python process, the
+database container) and the logger, so it is not comparable to the idle gate.
+
+| index | setting | recall@10 noisy | recall@10 quiet | p95 ms noisy | p95 ms quiet | quiet / noisy | `SELECT 1` p95 quiet |
+|---|---|---:|---:|---:|---:|---:|---:|
+| exact numpy |  | 1.000 | 1.000 | 2.78 | 1.86 | 0.67 |  |
+| pgvector HNSW | `ef_search` 16 | 0.960 | 0.961 | 4.64 | 2.92 | 0.63 | 1.28 |
+| pgvector HNSW | `ef_search` 32 | 0.985 | 0.985 | 4.87 | 2.98 | 0.61 | 1.13 |
+| pgvector HNSW | `ef_search` 64 | 0.995 | 0.995 | 5.74 | 3.74 | 0.65 | 0.95 |
+| pgvector HNSW | `ef_search` 128 | 0.998 | 0.998 | 10.31 | 4.85 | 0.47 | 1.00 |
+| pgvector HNSW | `ef_search` 256 | 0.999 | 0.999 | 12.18 | 6.73 | 0.55 | 1.10 |
+| pgvector IVFFlat | `probes` 1 | 0.384 | 0.387 | 3.95 | 2.31 | 0.58 | 0.85 |
+| pgvector IVFFlat | `probes` 4 | 0.636 | 0.630 | 3.58 | 2.21 | 0.62 | 1.14 |
+| pgvector IVFFlat | `probes` 16 | 0.840 | 0.842 | 4.04 | 2.54 | 0.63 | 0.96 |
+| pgvector IVFFlat | `probes` 64 | 0.955 | 0.953 | 6.65 | 3.84 | 0.58 | 1.03 |
+
+**Verdicts, side by side.** Both runs give the same registered verdict: pgvector qualifies under
+the pre-registered budget, with the same passing configurations (HNSW `ef_search` 32, 64, 128 and
+256). IVFFlat reaches 0.953 at best in the quiet run (0.955 in the noisy one) and never reaches 0.98.
+The quiet run is the registered measurement, as fixed beforehand; the noisy run is disclosed context.
+
+**Latency.** Every p95 fell, by 33 to 53 percent (the ratio column). Exact numpy went from 2.78 to
+1.86 ms. The bare `SELECT 1` p95 went from 1.9 to 3.6 ms in the noisy run to 0.85 to 1.28 ms in the
+quiet one, so the container round trip is about a millisecond when the machine is quiet. The slowest
+qualifying p95 is 6.73 ms (HNSW `ef_search` 256), against the 16.45 ms budget. Build: HNSW 33.5 s
+(53.2 s noisy), IVFFlat 6.6 s (11.6 s); index 45.4 and 40.3 MB; table 37.5 MB; heap load 4.2 s.
+Exact numpy's p95 here (1.86 ms) is also lower than in the FAISS run (4.33 ms): three runs, three
+loads, and no run of exact search is claimed to be the figure.
+
+**Recall tripwire, and what it found.** The largest recall difference between the two runs is 0.0054
+(IVFFlat `probes` 4), over the 0.005 threshold fixed beforehand, so it was investigated. Every
+other difference is at most 0.0027 for IVFFlat and 0.0011 for HNSW. Recall does not depend on
+load, so the likely cause is that the index itself differs from build to build (IVFFlat picks its
+cluster centres by random sampling; HNSW assigns graph levels at random). A recall-only check
+confirmed it: rebuilding each index three times on the same 22,789 vectors and the same 184 queries,
+with no timing and no result file, gave
+
+| index | setting | recall@10 over three rebuilds |
+|---|---|---|
+| IVFFlat | `probes` 1 | 0.365, 0.392, 0.376 |
+| IVFFlat | `probes` 4 | 0.623, 0.613, 0.633 |
+| IVFFlat | `probes` 16 | 0.837, 0.837, 0.824 |
+| IVFFlat | `probes` 64 | 0.945, 0.947, 0.946 |
+| HNSW | `ef_search` 16 | 0.951, 0.962, 0.964 |
+| HNSW | `ef_search` 64 | 0.9946, 0.9946, 0.9951 |
+
+The 0.0054 gap between the two runs sits inside the rebuild-to-rebuild spread (0.020 for IVFFlat at
+`probes` 4), so it is build randomness, not a load effect. Two consequences for what may be said:
+- Recall at low settings is a property of one built index, not a constant. The verdict does not
+  rest on it: HNSW at `ef_search` 64 and above clears the 0.98 floor by more than 0.01 in every
+  build and both runs. `ef_search` 32 cleared it by 0.005 in both runs (0.9853), but the
+  rebuild spread at `ef_search` 16 (0.013) means a different build could land under 0.98 there. So
+  `ef_search` 32 is reported as the lowest setting that qualified in these builds, not as a safe
+  operating point; 64 is the lowest setting with a margin.
+- The diagnostic was not part of the registered measurement and is not a result file. It used its
+  own scratch tables, three builds per index and no timing.
