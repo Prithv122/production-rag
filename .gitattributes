@@ -1,2 +1,4 @@
 eval/near_miss.jsonl -text
 eval/paraphrase_checks.jsonl -text
+eval/injection_attacks.jsonl -text
+eval/injection_assignments.jsonl -text
