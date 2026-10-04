@@ -262,39 +262,52 @@ vectors, which equals cosine). It is opt-in, and the default run still needs no 
   A bare `SELECT 1` p95 is recorded next to every configuration to show how much of the
   figure is the round trip. Each configuration's plan is checked to use the index, or the run
   stops.
-- **One run, once.** The result is [eval/results/ann_pgvector.json](eval/results/ann_pgvector.json).
+- **Two runs, and which one is quoted.** The first run
+  ([eval/results/ann_pgvector.json](eval/results/ann_pgvector.json)) was made with ordinary
+  desktop software using 40 to 70% of the CPU, so it was repeated under a quiet-machine gate fixed
+  beforehand (30 one-second samples, mean CPU below 15%, maximum below 40%, no model server; it
+  took four attempts to pass). That replication
+  ([eval/results/ann_pgvector_quiet.json](eval/results/ann_pgvector_quiet.json)) is the registered
+  measurement and the one below. Both give the same verdict. The comparison is in
+  [NOTES.md](NOTES.md).
 
-Real `heading` index, 22,789 × 384:
+Real `heading` index, 22,789 × 384, quiet machine:
 
 | Index | Setting | Recall@10 vs exact | p95 | `SELECT 1` p95 | Build | Index size |
 |---|---|---:|---:|---:|---:|---:|
-| exact (numpy) | | 1.000 | 2.78 ms | | — | 35.0 MB |
-| pgvector HNSW | `ef_search` 16 | 0.960 | 4.64 ms | 2.00 ms | 53.2 s | 45.4 MB |
-| pgvector HNSW | `ef_search` 32 | 0.985 | 4.87 ms | 2.13 ms | 53.2 s | 45.4 MB |
-| pgvector HNSW | `ef_search` 64 | 0.995 | 5.74 ms | 2.74 ms | 53.2 s | 45.4 MB |
-| pgvector HNSW | `ef_search` 256 | 0.999 | 12.18 ms | 3.63 ms | 53.2 s | 45.4 MB |
-| pgvector IVFFlat | `probes` 16 | 0.840 | 4.04 ms | 2.12 ms | 11.6 s | 40.2 MB |
-| pgvector IVFFlat | `probes` 64 | 0.955 | 6.65 ms | 1.90 ms | 11.6 s | 40.2 MB |
+| exact (numpy) | | 1.000 | 1.86 ms | | — | 35.0 MB |
+| pgvector HNSW | `ef_search` 16 | 0.961 | 2.92 ms | 1.28 ms | 33.5 s | 45.4 MB |
+| pgvector HNSW | `ef_search` 32 | 0.985 | 2.98 ms | 1.13 ms | 33.5 s | 45.4 MB |
+| pgvector HNSW | `ef_search` 64 | 0.995 | 3.74 ms | 0.95 ms | 33.5 s | 45.4 MB |
+| pgvector HNSW | `ef_search` 256 | 0.999 | 6.73 ms | 1.10 ms | 33.5 s | 45.4 MB |
+| pgvector IVFFlat | `probes` 16 | 0.842 | 2.54 ms | 0.96 ms | 6.6 s | 40.3 MB |
+| pgvector IVFFlat | `probes` 64 | 0.953 | 3.84 ms | 1.03 ms | 6.6 s | 40.3 MB |
 
 HNSW uses M=32 and `ef_construction`=200; IVFFlat uses 584 lists. Every setting, including
 `ef_search` 128 and `probes` 1 and 4, is in the JSON file.
 
 **Verdict: pgvector HNSW qualifies under the registered retrieval criterion.** HNSW at
-`ef_search` 32, 64, 128 and 256 each reach recall@10 >= 0.98 within 16.45 ms p95; 32 is the
-lowest tested setting that does. IVFFlat never reaches 0.98 (best 0.955 at `probes` 64).
+`ef_search` 32, 64, 128 and 256 each reach recall@10 >= 0.98 within 16.45 ms p95, and the slowest
+of them is 6.73 ms. IVFFlat never reaches 0.98 (best 0.953 at `probes` 64).
 
 What it does not say:
 
-- **Exact numpy stays the default.** At this size it is faster (2.78 ms p95 against 4.87 ms)
-  and has recall 1.0. pgvector was tested as the route to take when the corpus outgrows exact
-  search, and this run measured one corpus size only, so it says nothing about where the two
-  cross over.
-- **The container hop did not decide it.** `SELECT 1` p95 stayed between 1.9 and 3.6 ms, and the
-  slowest qualifying p95 (12.18 ms) is still inside the budget.
-- **It is one process on one connection on one machine**, with ordinary desktop software
-  running (no model server). Connection pooling, concurrent users, writes and a hosted Postgres
-  were not measured. Exact p95 here (2.78 ms) is lower than in the FAISS run (4.33 ms); the two
-  runs are separate and the spread is discussed in §7.
+- **`ef_search` 32 is not a safe operating point.** It cleared the floor by 0.005 in both runs,
+  but rebuilding the same index three times moved recall at `ef_search` 16 by 0.013, so a
+  different build could land under 0.98 at 32. 64 is the lowest setting with a margin (0.995, and
+  at least 0.01 above the floor in every build tried). Recall at low settings belongs to one built
+  index, not to the algorithm.
+- **Exact numpy stays the default.** At this size it is faster (1.86 ms p95 against 2.98 ms for the
+  cheapest qualifying HNSW setting) and has recall 1.0. pgvector was tested as the route to take
+  when the corpus outgrows exact search, and this run measured one corpus size only, so it says
+  nothing about where the two cross over.
+- **The container hop did not decide it.** `SELECT 1` p95 was 0.85 to 1.28 ms on the quiet
+  machine (1.9 to 3.6 ms in the first run, under load), and every qualifying p95 is far inside the
+  budget.
+- **It is one process on one connection on one machine.** Connection pooling, concurrent users,
+  writes and a hosted Postgres were not measured. Exact p95 differs between the three runs of this
+  harness (4.33 ms in the FAISS run, 2.78 ms in the first pgvector run, 1.86 ms here), which is why
+  §7 treats timing on this machine as noisy.
 
 ### Semantic answer cache — measured, and not shipped
 
@@ -1002,10 +1015,10 @@ If the corpus does cross over, the approximate index is not free. In the same sw
 (3.23 ms), with a 27-minute single-threaded build and 1.8 GB. Each of those is one run. The
 full sweep is in [eval/results/ann_synthetic.json](eval/results/ann_synthetic.json).
 
-For a Postgres-backed route, the real-index pgvector run (§5) puts HNSW at recall@10 0.985 and
-4.87 ms p95 at `ef_search` 32 and 0.995 at 5.74 ms at 64, inside the pre-registered budget.
-That makes HNSW in pgvector a qualified candidate for the scale-up path at 22,789 vectors. It
-was not run at larger sizes, so where it overtakes exact search is still unmeasured.
+For a Postgres-backed route, the real-index pgvector run (§5, quiet machine) puts HNSW at recall@10
+0.985 and 2.98 ms p95 at `ef_search` 32 and 0.995 at 3.74 ms at 64, inside the pre-registered
+budget. That makes HNSW in pgvector a qualified candidate for the scale-up path at 22,789 vectors.
+It was not run at larger sizes, so where it overtakes exact search is still unmeasured.
 
 **BM25's weight matrix stops fitting the rebuild model.** 1.1 M nonzeros becomes ~110 M;
 build time goes from 2.5 s to minutes, and the whole-index rebuild this project does on

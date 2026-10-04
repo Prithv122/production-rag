@@ -82,10 +82,16 @@ the exact result is the ground truth ANN gets compared to.
 
 I did measure the Postgres route, with the pass mark fixed first: recall@10 of at least 0.98
 and p95 within 16.45 ms, which is 10% of the 164.5 ms end-to-end p95. pgvector HNSW passed
-(0.985 and 4.87 ms at `ef_search` 32), IVFFlat did not (0.955 at best), and a bare `SELECT 1`
-took 1.9-3.6 ms, so the container round trip was not what decided it. Exact numpy is still
-faster at 22,789 vectors, so it stays the default. What I have not measured is a larger
-corpus on pgvector, so I can say HNSW is a qualified candidate, not where it overtakes exact.
+(0.995 and 3.74 ms at `ef_search` 64 on a quiet machine), IVFFlat did not (0.953 at best), and a
+bare `SELECT 1` took about a millisecond, so the container round trip was not what decided it. I
+ran it twice, because the first run had other software using the CPU; the second was held to a
+CPU gate I wrote down before running it, and both gave the same verdict. The one surprise was a
+recall difference between the two runs just over my own tripwire. I rebuilt the indexes three
+times and found recall at low settings moves by 0.01 to 0.02 per build, because the index is
+built with random choices. So I would not quote the lowest setting that passed, only one with a
+margin. Exact numpy is still faster at 22,789 vectors, so it stays the default. What I have not
+measured is a larger corpus on pgvector, so I can say HNSW is a qualified candidate, not where it
+overtakes exact.
 
 Second to break is BM25's rebuild model: 1.1 M nonzeros becomes ~110 M, and the whole-index
 rebuild on every ingest stops being viable. Incremental indexing means per-segment IDF, which

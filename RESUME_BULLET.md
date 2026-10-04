@@ -33,11 +33,13 @@ Form: **action → technical specifics → measured outcome.** Numbers or it doe
   with a stated scale threshold rather than by default.
 
 - Pre-registered a pass rule for a pgvector backend (recall@10 >= 0.98 and p95 <= **16.45 ms**,
-  10% of the measured 164.5 ms end-to-end p95) before measuring, pinned it in code, and ran the
-  sweep once: HNSW reached **0.985 recall@10 at 4.87 ms p95** (`ef_search` 32) over a real
-  Postgres round trip, a bare `SELECT 1` held at 1.9-3.6 ms, and IVFFlat never passed (best
-  **0.955**). Exact numpy stayed the default: faster at 22,789 vectors (2.78 ms), with the
-  scale-up route measured at one size only.
+  10% of the measured 164.5 ms end-to-end p95), pinned it in code, and measured it twice: once
+  under background load, then again under a quiet-machine CPU gate fixed beforehand. Both gave the
+  same verdict. On the quiet run HNSW reached **0.995 recall@10 at 3.74 ms p95** (`ef_search` 64,
+  over a real Postgres round trip; a bare `SELECT 1` was 0.85-1.28 ms) and IVFFlat never passed
+  (best **0.953**). Rebuilding the index showed low-setting recall moves by about 0.01-0.02 per
+  build, so I report the setting with a margin, not the lowest one that passed. Exact numpy stayed
+  the default (1.86 ms at 22,789 vectors); the scale-up route was measured at one size only.
 
 - Pre-registered a ship rule for a semantic answer cache (<=2% false hits on near-miss
   questions, <=2% wrong-entry hits, >=10% hit rate) and froze 40 near-miss questions before
