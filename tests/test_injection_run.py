@@ -468,3 +468,19 @@ def test_the_report_keeps_prompt_token_counts_visible():
     ]
     report = inj.format_report(inj.evaluate(rows, model="m"))
     assert "max prompt tokens" in report and "4259" in report
+
+
+def test_a_resumed_run_counts_the_live_rows_served_from_the_cache(tmp_path, monkeypatch):
+    class Cached(RuleProvider):
+        """A live provider whose every reply came from its cache, as after a crash and resume."""
+
+        def complete(self, prompt: str, **kwargs):
+            response = super().complete(prompt, **kwargs)
+            return LLMResponse(text=response.text, model=MODEL, provider="p", cached=True)
+
+    Stub(monkeypatch, live=Cached(hijack_if_poisoned, model=MODEL))
+    assert command(tmp_path) == 0
+    config = json.loads((tmp_path / "injection.json").read_text("utf-8"))["config"]
+    # 2 attack + 2 clean in each of M1/M3/C, plus B's 2 live attack rows; B's replayed clean
+    # half and the two derived arms are not live rows.
+    assert config["n_live_rows_from_cache"] == 2 + 3 * 4
