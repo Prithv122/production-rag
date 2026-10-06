@@ -872,14 +872,53 @@ def test_a_baseline_row_that_was_generated_not_replayed_stops_the_run():
         )
 
 
-def test_a_row_that_needed_a_live_retry_says_so():
-    chunks, question, ranking, _ = one_instance()
+def test_a_live_row_gets_exactly_one_attempt_whatever_the_first_reply_was():
+    # A retry would change json_object or the token budget, which the protocol fixes, and the
+    # replayed baseline cannot retry. So a bad first reply stays a failure row of its own kind.
+    chunks, question, ranking, instance = one_instance()
+    good = answer_json("Topic three is a dbt topic [4].")
+    cases = {
+        "truncated": LLMResponse(text="{}", model="m", provider="p", finish_reason="length"),
+        "unparseable": LLMResponse(text='{"thoughts": "hmm"}', model="m", provider="p"),
+        "blank": LLMResponse(text="   ", model="m", provider="p"),
+    }
+    for kind, first in cases.items():
+        clean_provider = FakeProvider([first, good])
+        (clean,) = inj.run_clean_rows(
+            inj.VARIANTS["B"],
+            clean_provider,
+            [question],
+            {question.qid: ranking},
+            chunks,
+            workers=1,
+        )
+        attack_provider = FakeProvider([first, good])
+        (attack,) = inj.run_attack_rows(
+            inj.VARIANTS["M3"], attack_provider, [instance], chunks, workers=1
+        )
+        for row, provider in ((clean, clean_provider), (attack, attack_provider)):
+            assert len(provider.prompts) == 1, kind  # no second call
+            assert row.refused and not row.retried and not row.success, kind
+            assert row.refusal_reason in ("truncated", "unparseable"), kind
+        assert attack.refusal_reason == clean.refusal_reason
+
+
+def test_retrying_is_still_available_to_the_library_but_never_used_by_the_run_functions():
+    chunks, _, _, ranking = world()
     cut = LLMResponse(text="{}", model="m", provider="p", finish_reason="length")
     good = answer_json("Topic three is a dbt topic [4].")
-    args = (inj.VARIANTS["B"], [question], {question.qid: ranking}, chunks)
-    (retried,) = inj.run_clean_rows(args[0], FakeProvider([cut, good]), *args[1:], workers=1)
-    (plain,) = inj.run_clean_rows(args[0], FakeProvider([good]), *args[1:], workers=1)
-    assert retried.retried and not plain.retried
+    provider = FakeProvider([cut, good])
+    answer, retried = inj.generate_variant_traced(
+        "q", ranking[:10], chunks, provider, inj.VARIANTS["B"], retry=True
+    )
+    assert retried and len(provider.prompts) == 2 and not answer.refused
+    # The run functions never pass retry=True.
+    import inspect
+
+    for fn in (inj.run_attack_rows, inj.run_clean_rows):
+        assert inspect.signature(fn).parameters["retry"].default is False
+    source = inspect.getsource(inj.run_protocol)
+    assert "retry=True" not in source and "retry=" not in source
 
 
 def test_a_live_provider_error_is_a_row_not_a_stop():
@@ -1285,3 +1324,51 @@ def test_the_clean_baseline_replays_from_the_committed_cache(tmp_path):
     answerable = [r for r in rows if not r.should_refuse]
     assert sum(r.refused for r in answerable) == 8 and len(answerable) == 54  # NOTES: 14.8%
     assert all(r.refused for r in rows if r.should_refuse)
+
+
+def test_the_protocol_strings_are_pinned_to_what_the_frozen_commit_registered():
+    # The notes test above reads the current NOTES.md, so an edit made in both places would pass
+    # it. These hashes were taken from the strings as committed in 76ad6f3.
+    import hashlib
+
+    def digest(text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    assert digest(inj.M1_RULE) == "8a45eb7e62ec13aee6b79cb398002e0aa92f3e0ebb343f47d9f60e592abfc256"
+    assert digest(inj.M3_RULE) == "d0eb3a72c2478c98fea8c19c5957f93398a29492d7224b9229ff1a4c197ba096"
+    assert (
+        digest(inj.SECRET_LINE)
+        == "f38ba9c6f96b7ca92e80470abcf5005c0e0c4d5a95e88ea4909c248f4ad60bc5"
+    )
+
+
+def test_the_report_always_shows_failures_and_fallbacks_not_only_when_the_gate_fails():
+    rows = synth_rows("B", wins=set(range(12))) + synth_rows("M1", wins={0, 1, 2}, invalid=2)
+    report = inj.format_report(inj.evaluate(rows, model="m"))
+    assert "parse-failure + provider-error" in report and "answered by another model" in report
+    assert "2/108 (1.9%" in report  # M1's two failed rows are visible beside its ASR
+
+
+def test_an_arm_that_fails_a_gate_is_reported_but_not_interpreted_whatever_its_asr():
+    rows = synth_rows("B", wins=set(range(12))) + synth_rows("M1", wins=set(), invalid=6)
+    arm = inj.evaluate(rows, model="m")["arms"]["M1"]
+    assert arm["asr"]["k"] == 0 and arm["valid"] is False and arm["qualifies"] is False
+    assert arm["verdict"].startswith("reported, not interpreted: validity")
+    assert "failed:" not in arm["verdict"]  # no reading of its conditions
+
+
+def test_failure_kinds_are_counted_apart_and_shown():
+    rows = synth_rows("B", wins=set(range(12))) + synth_rows("M1", wins=set(), invalid=3)
+    rows[48 + 54 + 6 + 0] = inj.InjectionRow(
+        **{**rows[48 + 54 + 6 + 0].as_dict(), "refusal_reason": "truncated"}
+    )
+    rows[48 + 54 + 6 + 1] = inj.InjectionRow(
+        **{**rows[48 + 54 + 6 + 1].as_dict(), "refusal_reason": "provider_error"}
+    )
+    result = inj.evaluate(rows, model="m")
+    assert result["arms"]["M1"]["failures"] == {
+        "unparseable": 1,
+        "truncated": 1,
+        "provider_error": 1,
+    }
+    assert "1 / 1 / 1" in inj.format_report(result)

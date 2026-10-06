@@ -25,10 +25,13 @@ half to get wrong: it fails with a bare `FileNotFoundError` on
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -863,14 +866,20 @@ def _git_state() -> tuple[str, bool]:
     return commit, bool(status.strip())
 
 
-def _ollama_ready(host: str, model: str, timeout: float = 5.0) -> str | None:
-    """`None` if the local Ollama lists `model`, else why not. Lists models; generates nothing."""
+def _ollama_ready(host: str, model: str, timeout: float = 5.0) -> tuple[str | None, str]:
+    """`(problem, digest)`: `problem` is `None` if the local Ollama lists `model`, else why not;
+    `digest` is the listed model's digest, recorded so the weights that answered can be named.
+    Lists models; generates nothing."""
     try:
         with urllib.request.urlopen(f"{host}/api/tags", timeout=timeout) as response:
-            names = {m.get("name") for m in json.loads(response.read())["models"]}
+            listed = {
+                m.get("name"): m.get("digest", "") for m in json.loads(response.read())["models"]
+            }
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        return f"could not list models at {host}: {exc}"
-    return None if model in names else f"{model} is not available at {host}"
+        return f"could not list models at {host}: {exc}", ""
+    if model not in listed:
+        return f"{model} is not available at {host}", ""
+    return None, str(listed[model])
 
 
 def _injection_providers(args: argparse.Namespace):
@@ -878,9 +887,12 @@ def _injection_providers(args: argparse.Namespace):
     from .cache import JsonCache
     from .injection import MODEL_ARM
 
-    if LLM_BUNDLE.exists():
-        JsonCache(args.llm_cache).import_jsonl(LLM_BUNDLE)  # existing entries win
-    baseline = build_provider(MODEL_ARM, cache_dir=args.llm_cache, offline=True, fallback=False)
+    # The baseline replays from a throwaway cache built from the committed bundle alone, so a
+    # different entry in the local cache can never stand in for a committed one.
+    replay_dir = Path(tempfile.mkdtemp(prefix="injection-baseline-"))
+    atexit.register(shutil.rmtree, replay_dir, True)
+    JsonCache(replay_dir).import_jsonl(LLM_BUNDLE)  # no bundle: FileNotFoundError, a stop
+    baseline = build_provider(MODEL_ARM, cache_dir=replay_dir, offline=True, fallback=False)
     live = build_provider(MODEL_ARM, cache_dir=args.llm_cache, offline=False, fallback=False)
     return baseline, live
 
@@ -913,7 +925,7 @@ def cmd_injection_run(args: argparse.Namespace) -> int:
             results_path=args.results,
         )
         baseline, live = _injection_providers(args)
-        problem = _ollama_ready(live.inner.host, live.model)
+        problem, digest = _ollama_ready(live.inner.host, live.model)
         if problem:
             raise ValueError(problem)
     except (FileNotFoundError, FileExistsError, ValueError, KeyError) as exc:
@@ -949,6 +961,7 @@ def cmd_injection_run(args: argparse.Namespace) -> int:
         **inj.run_config(live.model),
         "git_commit": commit,
         "git_dirty": dirty,
+        "ollama_digest": digest,
         "workers": args.workers,
         "elapsed_s": round(time.time() - started, 1),
         "n_retried": sum(1 for r in rows if r.retried and r.arm in inj.GENERATED_ARMS),

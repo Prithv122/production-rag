@@ -8,6 +8,7 @@ result as a counted row, and the result file must never exist unless the run com
 
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 from types import SimpleNamespace
@@ -184,7 +185,7 @@ class Stub:
         self.baseline = baseline or CannedReplay(model=MODEL)
         chunks = list(small_inputs().chunks.values())
         monkeypatch.setattr(cli, "_git_state", lambda: ("abc1234def", dirty))
-        monkeypatch.setattr(cli, "_ollama_ready", lambda host, model: ollama)
+        monkeypatch.setattr(cli, "_ollama_ready", lambda host, model: (ollama, "sha256:test"))
         monkeypatch.setattr(cli, "load_chunks", lambda root, strategy: chunks)
         monkeypatch.setattr(inj, "load_inputs", lambda chunks, **kw: small_inputs())
         monkeypatch.setattr(cli, "_injection_providers", self._providers)
@@ -207,6 +208,7 @@ def test_the_command_runs_end_to_end_and_writes_the_result_once(tmp_path, monkey
     assert command(tmp_path) == 0
     saved = json.loads((tmp_path / "injection.json").read_text("utf-8"))
     assert saved["config"]["git_commit"] == "abc1234def" and saved["config"]["git_dirty"] is False
+    assert saved["config"]["ollama_digest"] == "sha256:test"
     assert saved["config"]["protocol_commit"] == "76ad6f3" and saved["config"]["workers"] == 4
     assert set(saved["result"]["arms"]) == {"B", "M1", "M2", "M3", "C", "C+M2"}
     assert "| arm |" in capsys.readouterr().out  # the report was printed
@@ -319,11 +321,11 @@ def test_the_ollama_check_lists_models_and_generates_nothing(monkeypatch):
 
     def urlopen(url, timeout):
         seen.append(url)
-        return Response(json.dumps({"models": [{"name": MODEL}]}).encode())
+        return Response(json.dumps({"models": [{"name": MODEL, "digest": "sha256:abc"}]}).encode())
 
     monkeypatch.setattr(cli.urllib.request, "urlopen", urlopen)
-    assert cli._ollama_ready("http://h:1", MODEL) is None
-    assert "not available" in cli._ollama_ready("http://h:1", "other:7b")
+    assert cli._ollama_ready("http://h:1", MODEL) == (None, "sha256:abc")
+    assert "not available" in cli._ollama_ready("http://h:1", "other:7b")[0]
     assert set(seen) == {"http://h:1/api/tags"}  # a listing, never /api/chat or /api/generate
 
 
@@ -332,7 +334,7 @@ def test_an_unreachable_ollama_is_a_reason_not_a_crash(monkeypatch):
         raise OSError("connection refused")
 
     monkeypatch.setattr(cli.urllib.request, "urlopen", urlopen)
-    assert "could not list models" in cli._ollama_ready("http://h:1", MODEL)
+    assert "could not list models" in cli._ollama_ready("http://h:1", MODEL)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +351,7 @@ def test_the_real_protocol_dry_run_makes_exactly_the_registered_372_live_generat
     live = live_provider(lambda p, k: CLEAN_ANSWER)
     live.inner = SimpleNamespace(host="http://ollama.test")
     monkeypatch.setattr(cli, "_git_state", lambda: ("abc1234", False))
-    monkeypatch.setattr(cli, "_ollama_ready", lambda host, model: None)
+    monkeypatch.setattr(cli, "_ollama_ready", lambda host, model: (None, "sha256:test"))
     monkeypatch.setattr(cli, "_injection_providers", lambda args: (replay, live))
     out = tmp_path / "injection.json"
     assert main(["injection-run", "--out", str(out), "--llm-cache", str(tmp_path / "llm")]) == 0
@@ -366,3 +368,45 @@ def test_the_real_protocol_dry_run_makes_exactly_the_registered_372_live_generat
     b_clean = [r for r in saved["rows"] if r["arm"] == "B" and r["kind"] == "clean"]
     assert len(b_clean) == 60 and all(r["cached"] for r in b_clean)
     assert not out.with_name(out.name + ".partial").exists()
+
+
+def test_the_real_provider_wiring_is_offline_for_the_baseline_and_live_with_no_fallback(tmp_path):
+    live_cache = tmp_path / "live"
+    baseline, live = cli._injection_providers(argparse.Namespace(llm_cache=live_cache))
+    assert baseline.offline is True and live.offline is False
+    assert baseline.model == MODEL and live.model == MODEL
+    # No FallbackProvider anywhere: a failed call must never be answered by another model.
+    assert type(baseline.inner) is OllamaProvider and type(live.inner) is OllamaProvider
+    # The baseline reads a cache built from the committed bundle alone, apart from the live one.
+    assert baseline.cache.root != live.cache.root
+    assert len(baseline.cache) == len(
+        (EVAL / "cache" / "llm.jsonl").read_text("utf-8").splitlines()
+    )
+    assert not live_cache.exists()  # nothing was copied into the live cache
+
+
+def test_a_missing_bundle_is_a_stop_not_an_empty_baseline(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli, "LLM_BUNDLE", tmp_path / "gone.jsonl")
+    with pytest.raises(FileNotFoundError):
+        cli._injection_providers(argparse.Namespace(llm_cache=tmp_path / "live"))
+
+
+def test_the_run_makes_exactly_one_live_call_per_scheduled_row_even_when_every_reply_is_cut():
+    cut = LLMResponse(text="{}", model=MODEL, provider="p", finish_reason="length")
+
+    class AlwaysCut(FakeProvider):
+        def complete(self, prompt: str, **kwargs):
+            self.prompts.append(prompt)
+            self.kwargs.append(dict(kwargs))
+            return cut
+
+    live = AlwaysCut(model=MODEL)
+    rows, result = run(live=live)
+    assert len(live.prompts) == 2 + 3 * 4  # one per scheduled live row, no second attempts
+    assert not any(r.retried for r in rows)
+    assert all(k["max_tokens"] == 700 and k["json_object"] is True for k in live.kwargs)
+    # Every cut reply is a counted row of its own kind, and none is an attack outcome.
+    generated = [r for r in rows if r.arm in inj.GENERATED_ARMS and r.refusal_reason == "truncated"]
+    assert len(generated) == 2 + 3 * 4 and not any(r.success for r in rows)
+    assert result["arms"]["M1"]["failures"]["truncated"] == 4
+    assert result["arms"]["M1"]["valid"] is False

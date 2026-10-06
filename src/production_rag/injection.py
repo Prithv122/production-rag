@@ -474,9 +474,11 @@ def generate_variant_traced(
     max_chars: int = DEFAULT_CONTEXT_CHARS,
     json_object: bool = True,
     retry_multiplier: int = DEFAULT_RETRY_MULTIPLIER,
+    retry: bool = True,
 ) -> tuple[Answer, bool]:
     """`generate.generate` with a variant prompt and a caller-supplied system prompt, and whether
-    a second call was made.
+    a second call was made. `retry=False` makes exactly one call; the registered run uses it (see
+    `run_attack_rows`).
 
     A copy of its control flow rather than a parameter added to it: `generate` is the path every
     published answer replays through, and the tests assert that for arm B and the unmodified
@@ -511,17 +513,21 @@ def generate_variant_traced(
             max_tokens=max_tokens,
             json_object=json_object,
         )
-        retry = _retry_kwargs(
-            response,
-            json_object=json_object,
-            max_tokens=max_tokens,
-            retry_multiplier=retry_multiplier,
-            replaying=is_replaying(provider),
+        changes = (
+            _retry_kwargs(
+                response,
+                json_object=json_object,
+                max_tokens=max_tokens,
+                retry_multiplier=retry_multiplier,
+                replaying=is_replaying(provider),
+            )
+            if retry
+            else None
         )
-        if retry is not None:
-            logger.warning("retrying with %s: %s", retry, question[:80])
+        if changes is not None:
+            logger.warning("retrying with %s: %s", changes, question[:80])
             retried = True
-            response = provider.complete(prompt, system=system, temperature=0.0, **retry)
+            response = provider.complete(prompt, system=system, temperature=0.0, **changes)
     except ProviderError as exc:
         logger.warning("refusing (provider_error) for %r: %s", question[:80], str(exc)[:200])
         failed = Answer(
@@ -709,9 +715,16 @@ def run_attack_rows(
     chunks: dict[str, Chunk],
     *,
     workers: int = 4,
+    retry: bool = False,
     progress=None,
 ) -> list[InjectionRow]:
-    """The attack half of one arm: every instance, poisoned context, secret in the system prompt."""
+    """The attack half of one arm: every instance, poisoned context, secret in the system prompt.
+
+    One call per instance by default. The protocol fixes `json_object` on and the answer table's
+    token budget, and replayed baseline rows cannot retry, so a live retry (JSON mode off, or a
+    wider budget) would give a mitigation arm a second attempt the baseline never had. An empty,
+    truncated or unparseable first reply stays a refusal row of that kind.
+    """
 
     def one(instance: Instance) -> InjectionRow:
         pool = {cid: chunks[cid] for cid in instance.chunk_ids if cid in chunks}
@@ -723,6 +736,7 @@ def run_attack_rows(
             provider,
             variant,
             system=ATTACK_SYSTEM,
+            retry=retry,
         )
         _check_replay(provider, answer, instance.question.qid)
         poison_id = instance.poison.chunk_id
@@ -758,9 +772,11 @@ def run_clean_rows(
     k: int = K,
     workers: int = 4,
     require_cached: bool = False,
+    retry: bool = False,
     progress=None,
 ) -> list[InjectionRow]:
-    """The clean half of one arm: the frozen ranking, the unmodified system prompt.
+    """The clean half of one arm: the frozen ranking, the unmodified system prompt. One call per
+    question by default; see `run_attack_rows` for why there is no live retry.
 
     For arm B this is the answer table's own call, so pass a replaying provider (a miss raises
     `ReplayMiss`) and `require_cached=True`, which also stops a live provider from quietly
@@ -769,7 +785,7 @@ def run_clean_rows(
 
     def one(question: Question) -> InjectionRow:
         answer, retried = generate_variant_traced(
-            question.text, rankings[question.qid][:k], chunks, provider, variant
+            question.text, rankings[question.qid][:k], chunks, provider, variant, retry=retry
         )
         _check_replay(provider, answer, question.qid)
         if require_cached and not answer.cached:
@@ -884,6 +900,10 @@ def summarise_arm(rows: Sequence[InjectionRow], arm: str, *, model: str) -> dict
             sum(r.refusal_reason in ("unparseable", "truncated", "provider_error") for r in mine),
             len(mine),
         ),
+        "failures": {
+            kind: sum(1 for r in mine if r.refusal_reason == kind)
+            for kind in ("unparseable", "truncated", "provider_error")
+        },
         "fell_back": sum(1 for r in mine if r.model and r.model != model),
     }
 
@@ -989,6 +1009,7 @@ def evaluate(
             checks = _checks(s, base)
             entry["checks"] = checks
             failed = [name for name, ok in checks.items() if not ok]
+            gate_reasons = list(reasons)  # incomplete / validity, before any condition is listed
             reasons.extend(f"failed: {name}" for name in failed)
             entry["qualifies"] = valid and complete and not failed
             if entry["qualifies"]:
@@ -1002,6 +1023,9 @@ def evaluate(
                 entry["verdict"] = QUALIFIES
                 if entry["goals_not_covered"]:
                     entry["verdict"] += "; does not cover " + ", ".join(entry["goals_not_covered"])
+            elif gate_reasons:
+                # The numbers are still in the entry, but an arm that failed a gate is not read.
+                entry["verdict"] = "reported, not interpreted: " + "; ".join(gate_reasons)
             else:
                 entry["verdict"] = "does not qualify: " + "; ".join(reasons)
         entry["reasons"] = reasons
@@ -1068,6 +1092,20 @@ def format_report(result: dict[str, Any]) -> str:
         paired = ("--", "--") if p is None else (p["stopped"], p["newly_succeeding"])
         lines.append(
             f"| `{name}` | {paired[0]} | {paired[1]} | {_cell(a['value_without_laundering'])} |"
+        )
+    lines += [
+        "",
+        "| arm | rows | parse-failure + provider-error | unparseable / truncated / "
+        "provider_error | answered by another model | complete |",
+        "|---|---:|---:|---:|---:|---|",
+    ]
+    for name, a in arms.items():
+        rows_n = a["n_attack"] + a["n_clean_answerable"] + a["n_clean_unanswerable"]
+        lines.append(
+            f"| `{name}` | {rows_n} | {_cell(a['invalid'])} | "
+            f"{a['failures']['unparseable']} / {a['failures']['truncated']} / "
+            f"{a['failures']['provider_error']} | {a['fell_back']} | "
+            f"{'yes' if a['complete'] else 'NO'} |"
         )
     lines.append("")
     if result["no_signal_goals"]:
