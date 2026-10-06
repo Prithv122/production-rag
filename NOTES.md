@@ -1372,3 +1372,31 @@ baseline of at least 10 successes means half is at least 5, while the 10% bar al
 command that runs the arms, which will load the subset, build the local-model provider with fallback
 off, replay arm B's clean half, and `save` once. The README, interview notes and resume bullet wait
 for the run.
+
+## Prompt injection: run command built, not yet run (2026-10-06)
+
+`production-rag injection-run` runs every arm once. It adds no rule and changes no choice recorded
+above; this section says what it checks before it generates anything and what it will not do.
+
+**Before the first live call, in order, and any failure exits without generating:** the output file
+must not exist; both frozen files must hash to the registered values; the working tree must be clean
+(`--allow-dirty` runs anyway and records `git_dirty` in the result); every input must load, with the
+60-question subset split 54 + 6, a frozen ranking for every question and all 48 instances built; and
+the local Ollama must list the registered model (a model listing, not a generation). Then the clean
+half of arm B is replayed from the committed cache first, so a cache miss stops the run before any
+live call, and every baseline row must have come from the cache even if the provider could generate.
+Both providers must be the registered model with no fallback. The command has no model-choice flag,
+and no replay flag.
+
+**One result file, written once.** The run is held in memory and written at the end, beside the target
+and then renamed into place, so a crash leaves no file that could be mistaken for the result. A
+generation that fails during the run is a `provider_error` row inside the finished result and counts
+against the arm's 5% validity allowance; it is never dropped and never an attack success. Anything
+else that goes wrong raises and saves nothing; a rerun resumes from the cache, and the saved result
+records the commit, whether the tree was dirty, the worker count and how many rows needed a live retry.
+
+**Dry run.** A slow test runs the real inputs and the real baseline replay with a fake live model and
+confirms exactly 372 live generations (192 attack plus 180 clean), all six arms complete at 48 attack
+and 54 + 6 clean rows, and 60 replayed baseline rows. No real model was involved.
+
+**Not checked by the command:** that the machine is quiet. That stays a manual gate before the run.

@@ -42,6 +42,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
+from .answers import FROZEN_ARM, FROZEN_STRATEGY, load_frozen_retrievals
 from .bm25 import tokenize
 from .chunking import Chunk
 from .generate import (
@@ -60,8 +61,8 @@ from .generate import (
     build_passages,
     logger,
 )
-from .groundtruth import Question, gold_chunk_ids
-from .providers import LLMProvider, ProviderError, is_replaying
+from .groundtruth import Question, gold_chunk_ids, index_chunks_by_doc, load_questions
+from .providers import MODEL_ARMS, LLMProvider, ProviderError, is_replaying
 
 ATTACKS_PATH = Path("eval/injection_attacks.jsonl")
 ASSIGNMENTS_PATH = Path("eval/injection_assignments.jsonl")
@@ -1083,12 +1084,18 @@ def format_report(result: dict[str, Any]) -> str:
 def save(
     path: Path, rows: Sequence[InjectionRow], result: dict[str, Any], config: dict[str, Any]
 ) -> None:
-    """Write the run. A finished run is never overwritten: the protocol makes the run once."""
+    """Write the finished run, once. The protocol makes the run once, so an existing file is never
+    replaced, and the file appears only when complete: it is written beside the target and
+    renamed into place, so a crash cannot leave a partial file that looks like the result."""
     path = Path(path)
+    if path.exists():
+        raise FileExistsError(f"{path} already exists; a finished run is never overwritten")
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"config": config, "result": result, "rows": [r.as_dict() for r in rows]}
-    with path.open("x", encoding="utf-8", newline="\n") as handle:
+    staging = path.with_name(path.name + ".partial")
+    with staging.open("w", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(payload, indent=1, ensure_ascii=False) + "\n")
+    staging.rename(path)  # Windows refuses an existing target; the check above covers POSIX
 
 
 def run_config(model: str, *, k: int = K) -> dict[str, Any]:
@@ -1106,3 +1113,111 @@ def run_config(model: str, *, k: int = K) -> dict[str, Any]:
         "m1_rule": M1_RULE,
         "m3_rule": M3_RULE,
     }
+
+
+# ---------------------------------------------------------------------------
+# the whole run
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Inputs:
+    """Everything a run reads, loaded and cross-checked before any generation."""
+
+    attacks: list[Attack]
+    instances: list[Instance]
+    subset: list[Question]
+    rankings: dict[str, list[str]]
+    chunks: dict[str, Chunk]
+
+
+def load_inputs(
+    chunks: dict[str, Chunk],
+    *,
+    attacks_path: Path = ATTACKS_PATH,
+    assignments_path: Path = ASSIGNMENTS_PATH,
+    answers_path: Path = ANSWERS_PATH,
+    questions_path: Path,
+    results_path: Path,
+    k: int = K,
+) -> Inputs:
+    """Load every input and raise on anything that is not the registered one.
+
+    The frozen files are hash-checked first; the attack set, the assignment, the 60-question
+    subset and its 54 + 6 split, and a frozen ranking for every question are then validated, and
+    all 48 instances are built. Any failure here is before any generation.
+    """
+    verify_frozen(attacks_path, assignments_path)
+    attacks = load_attacks(attacks_path)
+    subset = load_clean_subset(answers_path, load_questions(questions_path))
+    pairs = load_assignments(assignments_path, attacks, [q for q in subset if q.is_answerable])
+    rankings = load_frozen_retrievals(results_path, arm=FROZEN_ARM, strategy=FROZEN_STRATEGY, k=k)
+    unranked = sorted(q.qid for q in subset if q.qid not in rankings)
+    if unranked:
+        raise ValueError(f"{len(unranked)} subset questions have no frozen ranking: {unranked[:3]}")
+    instances = build_instances(pairs, rankings, index_chunks_by_doc(chunks.values()), k=k)
+    return Inputs(attacks, instances, subset, rankings, chunks)
+
+
+def run_protocol(
+    inputs: Inputs,
+    *,
+    baseline_provider: LLMProvider,
+    live_provider: LLMProvider,
+    workers: int = 4,
+    expected_model: str = MODEL_ARMS[MODEL_ARM]["model"],
+    progress=None,
+) -> tuple[list[InjectionRow], dict[str, Any]]:
+    """Run every arm once and return all rows (derived arms included) and the verdict.
+
+    Order matters. The clean baseline is replayed first, from a replaying provider with
+    `require_cached`, so a cache miss stops the run before any live call is made. Both providers
+    must be the registered model. Nothing is saved here and a provider error becomes a row, so it
+    is counted against the validity gate inside the finished result and never as a quiet gap;
+    anything else that goes wrong raises and leaves no result.
+    """
+    for provider in (baseline_provider, live_provider):
+        if provider.model != expected_model:
+            raise ValueError(
+                f"provider is {provider.model!r}, registered model is {expected_model!r}"
+            )
+    if not is_replaying(baseline_provider):
+        raise ValueError("the baseline provider must be a replaying one")
+    if is_replaying(live_provider):
+        raise ValueError("the live provider must not be a replaying one")
+
+    rows = run_clean_rows(
+        VARIANTS[BASELINE],
+        baseline_provider,
+        inputs.subset,
+        inputs.rankings,
+        inputs.chunks,
+        workers=workers,
+        require_cached=True,
+        progress=progress,
+    )
+    rows += run_attack_rows(
+        VARIANTS[BASELINE], live_provider, inputs.instances, inputs.chunks,
+        workers=workers, progress=progress,
+    )  # fmt: skip
+    for name in GENERATED_ARMS:
+        if name == BASELINE:
+            continue
+        variant = VARIANTS[name]
+        rows += run_attack_rows(
+            variant, live_provider, inputs.instances, inputs.chunks,
+            workers=workers, progress=progress,
+        )  # fmt: skip
+        rows += run_clean_rows(
+            variant, live_provider, inputs.subset, inputs.rankings, inputs.chunks,
+            workers=workers, progress=progress,
+        )  # fmt: skip
+
+    rows = all_arms(rows)
+    answerable = sum(1 for q in inputs.subset if q.is_answerable)
+    result = evaluate(
+        rows,
+        model=expected_model,
+        n_attack=len(inputs.instances),
+        n_answerable=answerable,
+        n_unanswerable=len(inputs.subset) - answerable,
+    )
+    return rows, result

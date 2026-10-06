@@ -27,8 +27,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -845,6 +847,123 @@ def cmd_semcache_sweep(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# injection-run -- the registered prompt-injection experiment, run once
+# ---------------------------------------------------------------------------
+def _git_state() -> tuple[str, bool]:
+    """`(HEAD commit, working tree has changes)`. Unknown counts as dirty."""
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "status", "--porcelain"], capture_output=True, text=True, check=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return "", True
+    return commit, bool(status.strip())
+
+
+def _ollama_ready(host: str, model: str, timeout: float = 5.0) -> str | None:
+    """`None` if the local Ollama lists `model`, else why not. Lists models; generates nothing."""
+    try:
+        with urllib.request.urlopen(f"{host}/api/tags", timeout=timeout) as response:
+            names = {m.get("name") for m in json.loads(response.read())["models"]}
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return f"could not list models at {host}: {exc}"
+    return None if model in names else f"{model} is not available at {host}"
+
+
+def _injection_providers(args: argparse.Namespace):
+    """The baseline (replay only) and live providers, both the registered model, no fallback."""
+    from .cache import JsonCache
+    from .injection import MODEL_ARM
+
+    if LLM_BUNDLE.exists():
+        JsonCache(args.llm_cache).import_jsonl(LLM_BUNDLE)  # existing entries win
+    baseline = build_provider(MODEL_ARM, cache_dir=args.llm_cache, offline=True, fallback=False)
+    live = build_provider(MODEL_ARM, cache_dir=args.llm_cache, offline=False, fallback=False)
+    return baseline, live
+
+
+def cmd_injection_run(args: argparse.Namespace) -> int:
+    """Run every arm once and write the result, or stop before any generation.
+
+    Everything that can be checked without a model is checked first, in order: the output file
+    must not exist, the two frozen files must hash to the registered values, the working tree
+    must be clean (or `--allow-dirty`, which is recorded in the result), every input must load
+    and all 48 instances must build, and the local model must be listed. The result file is
+    written once, at the end, from the finished run.
+    """
+    from . import injection as inj
+
+    try:
+        if args.out.exists():
+            raise FileExistsError(f"{args.out} already exists; the run is made once")
+        inj.verify_frozen(args.attacks, args.assignments)
+        commit, dirty = _git_state()
+        if dirty and not args.allow_dirty:
+            raise ValueError("the working tree is not clean (commit first, or pass --allow-dirty)")
+        chunks = {c.chunk_id: c for c in load_chunks(args.indexes, FROZEN_STRATEGY)}
+        inputs = inj.load_inputs(
+            chunks,
+            attacks_path=args.attacks,
+            assignments_path=args.assignments,
+            answers_path=args.answers,
+            questions_path=args.questions,
+            results_path=args.results,
+        )
+        baseline, live = _injection_providers(args)
+        problem = _ollama_ready(live.inner.host, live.model)
+        if problem:
+            raise ValueError(problem)
+    except (FileNotFoundError, FileExistsError, ValueError, KeyError) as exc:
+        print(f"injection-run: {exc}", file=sys.stderr)
+        return 1
+
+    total = len(inputs.instances) * 4 + len(inputs.subset) * 4
+    done = 0
+
+    def progress(row) -> None:
+        nonlocal done
+        done += 1
+        if done % 10 == 0 or done == total:
+            print(f"  {done}/{total}", flush=True)
+
+    print(
+        f"{len(inputs.instances)} attack instances, {len(inputs.subset)} clean questions, ", end=""
+    )
+    print(f"model {live.model}, commit {commit[:7] or 'unknown'}{' (dirty)' if dirty else ''}")
+    started = time.time()
+    try:
+        rows, result = inj.run_protocol(
+            inputs,
+            baseline_provider=baseline,
+            live_provider=live,
+            workers=args.workers,
+            progress=progress,
+        )
+    except (inj.ReplayMiss, ValueError) as exc:
+        print(f"injection-run: stopped, nothing saved: {exc}", file=sys.stderr)
+        return 1
+    config = {
+        **inj.run_config(live.model),
+        "git_commit": commit,
+        "git_dirty": dirty,
+        "workers": args.workers,
+        "elapsed_s": round(time.time() - started, 1),
+        "n_retried": sum(1 for r in rows if r.retried and r.arm in inj.GENERATED_ARMS),
+    }
+    try:
+        inj.save(args.out, rows, result, config)
+    except FileExistsError as exc:
+        print(f"injection-run: {exc}", file=sys.stderr)
+        return 1
+    print("\n" + inj.format_report(result))
+    print(f"\nwrote {args.out}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # wiring
 # ---------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
@@ -1106,6 +1225,28 @@ def build_parser() -> argparse.ArgumentParser:
     sweep.add_argument("--out", type=Path, default=Path("eval/results/semcache.json"))
     _add_component_args(sweep)
     sweep.set_defaults(func=cmd_semcache_sweep)
+
+    from .injection import ANSWERS_PATH, ASSIGNMENTS_PATH, ATTACKS_PATH, OUT_PATH
+
+    injection = subparsers.add_parser(
+        "injection-run",
+        help="run the registered prompt-injection experiment once (local model, ~3 hours)",
+    )
+    injection.add_argument("--attacks", type=Path, default=ATTACKS_PATH)
+    injection.add_argument("--assignments", type=Path, default=ASSIGNMENTS_PATH)
+    injection.add_argument("--answers", type=Path, default=ANSWERS_PATH)
+    injection.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
+    injection.add_argument("--results", type=Path, default=ANSWER_RESULTS_IN)
+    injection.add_argument("--indexes", type=Path, default=INDEX_DIR)
+    injection.add_argument("--llm-cache", type=Path, default=LLM_CACHE)
+    injection.add_argument("--workers", type=int, default=4)
+    injection.add_argument("--out", type=Path, default=OUT_PATH)
+    injection.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="run from an uncommitted tree; recorded in the result as git_dirty",
+    )
+    injection.set_defaults(func=cmd_injection_run)
 
     cache = subparsers.add_parser("cache", help="bundle or restore the replay caches")
     cache.add_argument(
