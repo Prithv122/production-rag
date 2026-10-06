@@ -30,6 +30,7 @@ from test_injection import (
     hijack_if_poisoned,
     make_attack,
     real_chunks,
+    synth_rows,
     world,
 )
 
@@ -209,6 +210,8 @@ def test_the_command_runs_end_to_end_and_writes_the_result_once(tmp_path, monkey
     saved = json.loads((tmp_path / "injection.json").read_text("utf-8"))
     assert saved["config"]["git_commit"] == "abc1234def" and saved["config"]["git_dirty"] is False
     assert saved["config"]["ollama_digest"] == "sha256:test"
+    assert saved["config"]["n_live_rows_from_cache"] == 0
+    assert saved["config"]["num_ctx_live"] == 8192 and saved["config"]["answer_tokens"] == 700
     assert saved["config"]["protocol_commit"] == "76ad6f3" and saved["config"]["workers"] == 4
     assert set(saved["result"]["arms"]) == {"B", "M1", "M2", "M3", "C", "C+M2"}
     assert "| arm |" in capsys.readouterr().out  # the report was printed
@@ -374,6 +377,7 @@ def test_the_real_provider_wiring_is_offline_for_the_baseline_and_live_with_no_f
     live_cache = tmp_path / "live"
     baseline, live = cli._injection_providers(argparse.Namespace(llm_cache=live_cache))
     assert baseline.offline is True and live.offline is False
+    assert live.inner.num_ctx == inj.NUM_CTX == 8192 and baseline.inner.num_ctx is None
     assert baseline.model == MODEL and live.model == MODEL
     # No FallbackProvider anywhere: a failed call must never be answered by another model.
     assert type(baseline.inner) is OllamaProvider and type(live.inner) is OllamaProvider
@@ -410,3 +414,57 @@ def test_the_run_makes_exactly_one_live_call_per_scheduled_row_even_when_every_r
     assert len(generated) == 2 + 3 * 4 and not any(r.success for r in rows)
     assert result["arms"]["M1"]["failures"]["truncated"] == 4
     assert result["arms"]["M1"]["valid"] is False
+
+
+# ---------------------------------------------------------------------------
+# the context window
+# ---------------------------------------------------------------------------
+def capture_ollama(monkeypatch):
+    sent: list[dict] = []
+
+    def post(url, payload, headers, timeout):
+        sent.append(payload)
+        return {"message": {"content": "{}"}, "model": MODEL, "done_reason": "stop"}
+
+    monkeypatch.setattr("production_rag.providers._post_json", post)
+    return sent
+
+
+def test_num_ctx_is_sent_only_when_set_and_the_output_budget_is_untouched(monkeypatch):
+    sent = capture_ollama(monkeypatch)
+    OllamaProvider(MODEL).complete("p", system="s", max_tokens=700, json_object=True)
+    OllamaProvider(MODEL, num_ctx=8192).complete("p", system="s", max_tokens=700, json_object=True)
+    assert "num_ctx" not in sent[0]["options"]
+    assert sent[1]["options"] == {"temperature": 0.0, "num_predict": 700, "num_ctx": 8192}
+    assert sent[1]["format"] == "json" and sent[0]["messages"] == sent[1]["messages"]
+
+
+def test_the_window_is_not_part_of_the_cache_key_so_the_baseline_stays_the_same_entry(
+    tmp_path, monkeypatch
+):
+    capture_ollama(monkeypatch)
+    cache = JsonCache(tmp_path / "c")
+    CachedProvider(OllamaProvider(MODEL), cache).complete("p", system="s", max_tokens=700)
+    replay = CachedProvider(OllamaProvider(MODEL, num_ctx=8192), cache, offline=True)
+    assert replay.complete("p", system="s", max_tokens=700).cached is True  # a hit, not a miss
+
+
+def test_build_provider_passes_the_window_to_local_arms_only(tmp_path):
+    from production_rag.providers import OpenRouterProvider, build_provider
+
+    local = build_provider(inj.MODEL_ARM, cache_dir=tmp_path, fallback=False, num_ctx=8192)
+    assert local.inner.num_ctx == 8192
+    hosted = build_provider("nemotron-super", cache_dir=tmp_path, fallback=False, num_ctx=8192)
+    assert isinstance(hosted.inner, OpenRouterProvider)  # no such option on the hosted client
+
+
+def test_the_report_keeps_prompt_token_counts_visible():
+    rows = synth_rows("B", wins=set(range(12))) + synth_rows("M1", wins={0})
+    rows = [
+        inj.InjectionRow(**{**r.as_dict(), "prompt_tokens": 4259})
+        if r.arm == "M1" and r.qid == "a3"
+        else r
+        for r in rows
+    ]
+    report = inj.format_report(inj.evaluate(rows, model="m"))
+    assert "max prompt tokens" in report and "4259" in report

@@ -885,7 +885,7 @@ def _ollama_ready(host: str, model: str, timeout: float = 5.0) -> tuple[str | No
 def _injection_providers(args: argparse.Namespace):
     """The baseline (replay only) and live providers, both the registered model, no fallback."""
     from .cache import JsonCache
-    from .injection import MODEL_ARM
+    from .injection import MODEL_ARM, NUM_CTX
 
     # The baseline replays from a throwaway cache built from the committed bundle alone, so a
     # different entry in the local cache can never stand in for a committed one.
@@ -893,7 +893,9 @@ def _injection_providers(args: argparse.Namespace):
     atexit.register(shutil.rmtree, replay_dir, True)
     JsonCache(replay_dir).import_jsonl(LLM_BUNDLE)  # no bundle: FileNotFoundError, a stop
     baseline = build_provider(MODEL_ARM, cache_dir=replay_dir, offline=True, fallback=False)
-    live = build_provider(MODEL_ARM, cache_dir=args.llm_cache, offline=False, fallback=False)
+    live = build_provider(
+        MODEL_ARM, cache_dir=args.llm_cache, offline=False, fallback=False, num_ctx=NUM_CTX
+    )
     return baseline, live
 
 
@@ -965,6 +967,13 @@ def cmd_injection_run(args: argparse.Namespace) -> int:
         "workers": args.workers,
         "elapsed_s": round(time.time() - started, 1),
         "n_retried": sum(1 for r in rows if r.retried and r.arm in inj.GENERATED_ARMS),
+        # Live rows already in the local cache (a resumed run). Errors are not cached, so a row
+        # that failed in a crashed run is attempted again; the crashed run saved nothing.
+        "n_live_rows_from_cache": sum(
+            1
+            for r in rows
+            if r.arm in inj.GENERATED_ARMS and r.cached and not (r.arm == "B" and r.kind == "clean")
+        ),
     }
     try:
         inj.save(args.out, rows, result, config)

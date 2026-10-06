@@ -238,6 +238,11 @@ class OllamaProvider:
     model_name: str = DEFAULT_OLLAMA_MODEL
     host: str | None = None
     timeout: float = 300.0
+    num_ctx: int | None = None
+    """Context window sent with each call. `None` leaves the server's default, which is what every
+    committed cache entry was generated under. It is deliberately not part of the cache key: it
+    sets how much input fits, not what is asked, so a window large enough for the prompt gives the
+    same entry. A prompt longer than the window is silently cut at its start by Ollama."""
 
     def __post_init__(self) -> None:
         self.host = (self.host or os.environ.get("OLLAMA_HOST") or DEFAULT_OLLAMA_HOST).rstrip("/")
@@ -268,6 +273,8 @@ class OllamaProvider:
             "stream": False,
             "options": {"temperature": temperature, "num_predict": max_tokens},
         }
+        if self.num_ctx is not None:
+            payload["options"]["num_ctx"] = self.num_ctx
         if json_object:
             payload["format"] = "json"
 
@@ -572,8 +579,9 @@ def build_provider(
     cache_dir: Path = CACHE_DIR,
     offline: bool = False,
     fallback: bool = True,
+    num_ctx: int | None = None,
 ) -> CachedProvider:
-    """Assemble the provider stack for a named arm.
+    """Assemble the provider stack for a named arm. `num_ctx` applies to Ollama arms only.
 
     Layering is cache -> fallback chain -> concrete provider, and that order is
     load-bearing. Cache outermost means a replay never touches the chain at all,
@@ -586,7 +594,7 @@ def build_provider(
 
     primary: LLMProvider
     if spec["provider"] == "ollama":
-        primary = OllamaProvider(spec["model"])
+        primary = OllamaProvider(spec["model"], num_ctx=num_ctx)
     else:
         primary = OpenRouterProvider(spec["model"])
 
