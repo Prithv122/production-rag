@@ -16,6 +16,10 @@ dependencies = [
 production-rag = "production_rag.cli:main"
 
 [project.optional-dependencies]
+# Reads API keys from the OS credential store (see src/production_rag/secret_store.py).
+secrets = [
+    "keyring>=25",
+]
 embed = [
     "sentence-transformers>=3.0",
 ]

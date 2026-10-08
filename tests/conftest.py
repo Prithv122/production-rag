@@ -162,3 +162,9 @@ class FakeProvider:
 @pytest.fixture
 def reranker() -> FakeReranker:
     return FakeReranker()
+
+
+@pytest.fixture(autouse=True)
+def no_keyring(monkeypatch):
+    """A key stored on the developer's machine must never reach a test."""
+    monkeypatch.setenv("SECRETS_NO_KEYRING", "1")

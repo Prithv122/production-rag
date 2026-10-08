@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from .cache import JsonCache
+from .secret_store import get_secret
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_OPENROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
@@ -140,7 +141,7 @@ class OpenRouterProvider:
     url: str = OPENROUTER_URL
 
     def __post_init__(self) -> None:
-        self.api_key = self.api_key or os.environ.get("OPENROUTER_API_KEY") or ""
+        self.api_key = self.api_key or get_secret("OPENROUTER_API_KEY") or ""
 
     @property
     def name(self) -> str:
