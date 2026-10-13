@@ -216,3 +216,106 @@ Three rules that made this useful rather than merely clever:
 
 Delete the job when finished. It carries a secret binding and there is no reason to leave one
 lying around for a diagnosis that is over.
+
+
+---
+
+## Tracing (optional)
+
+> **Status, stated plainly.** The live Cloud Run service is **unchanged and untraced**. The code
+> to trace it exists and is switched on by environment variables alone, but nothing is set, and
+> **live tracing is deferred pending a hosting and cost decision that is the owner's to make**
+> (below). Until then the deployed image behaves exactly as it did before tracing existed.
+
+What it gives: one trace per question, with a span for each stage (`rewrite`, `retrieve.bm25`,
+`retrieve.dense`, `fuse`, `rerank`, `generate`), timings, token counts and a cost per model call.
+The design, the span names and the attribute names are in `src/production_rag/tracing.py`; the
+overhead budget it is held to is registered in `NOTES.md`.
+
+### What is and is not exported
+
+| Exported always | Exported only with `PRODUCTION_RAG_TRACE_CONTENT=1` | Never exported |
+|---|---|---|
+| stage names and durations, retrieval arm, `k`, strategy, model and provider, token counts, cost, whether the answer was cached or refused, the error *type* of a failed stage | the question text, the prompt sent to the model (which contains the retrieved passages) and the model's reply | stack traces, API keys, request headers, the visitor's IP address |
+
+The question a visitor types is **user data**, and so is anything that quotes it, so content capture
+is **off by default** and should stay off on the public demo. The retrieved passages come from public
+documentation, but they sit in the same prompt as the question. The metadata that is exported is
+low-risk but not nothing: it shows when someone used the demo and whether an answer was refused. Error
+*messages* are recorded only for operational failures (an HTTP status from a provider, a timeout, a
+cache miss); for any other exception only its type is kept, because such a message can quote input.
+
+Where trace data lives and for how long is decided by the backend, not by this repository:
+Langfuse Cloud keeps it for the plan's data-access window; a self-hosted Langfuse or Phoenix keeps it
+until someone deletes it (no retention policy is configured in `tracing.compose.yml`). If content
+capture is ever turned on for a public service, say so on the page.
+
+### Switching it on (nothing here is set today)
+
+Tracing needs the `tracing` extra in the image, which the current `space/Dockerfile` does **not**
+install (it was left alone so the deployed image is unchanged and its pinned stack is not disturbed
+by an unbuilt change). The one-line change, when the owner decides:
+
+```diff
+-        ".[embed]" \
++        ".[embed,tracing]" \
+```
+
+Without the extra, setting the variables below logs one warning and the app runs untraced.
+
+| Variable | Value | Notes |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | the collector's base URL | Setting this is what turns tracing on. `PRODUCTION_RAG_TRACING=0` forces it off even when this is set; `PRODUCTION_RAG_TRACING=1` turns it on against the default `localhost:4318`. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | `Authorization=Basic <base64(public:secret)>` for Langfuse | Carries a credential: bind it from **Secret Manager**, never `--set-env-vars`. |
+| `PRODUCTION_RAG_TRACE_CONTENT` | unset | Leave unset. See above. |
+| `PRODUCTION_RAG_TRACE_EXPORT_TIMEOUT_S` | default `5` | Upper bound on one export attempt. Export runs on a background thread, so a dead collector costs dropped spans and a log line, not request latency. |
+
+Endpoints, both OTLP over HTTP (gRPC is not used):
+
+| Backend | `OTEL_EXPORTER_OTLP_ENDPOINT` | Auth |
+|---|---|---|
+| Langfuse (self-hosted v3.22 or later) | `https://<host>/api/public/otel` | Basic, from the project's public and secret key |
+| Langfuse Cloud (EU) | `https://cloud.langfuse.com/api/public/otel` (US: `https://us.cloud.langfuse.com/api/public/otel`) | same; also add `x-langfuse-ingestion-version=4` to the headers |
+| Arize Phoenix | `http://<host>:6006` (traces go to `/v1/traces`) | none by default |
+
+Source for the Langfuse endpoints, headers and attribute mapping:
+<https://langfuse.com/integrations/native/opentelemetry> (read 2026-10-13).
+
+```bash
+# Store the header value once. It is "Authorization=Basic " followed by base64("<public>:<secret>").
+gcloud secrets create otel-headers --replication-policy=automatic --data-file=-
+
+gcloud run services update production-rag --region "$REGION" \
+  --set-env-vars OTEL_EXPORTER_OTLP_ENDPOINT=https://<collector>/api/public/otel \
+  --set-secrets OTEL_EXPORTER_OTLP_HEADERS=otel-headers:latest
+```
+
+**Cloud Run caveat, untested here.** By default Cloud Run throttles an instance's CPU between
+requests, and the exporter sends batches from a background thread on a timer. Spans can therefore be
+delayed until the next request, and an instance that is stopped with spans still queued loses them.
+The remedies are `--no-cpu-throttling` (instance-based billing, which costs more) or a short
+`OTEL_BSP_SCHEDULE_DELAY` (milliseconds) so batches leave sooner; neither has been tried on the live
+service. Treat the first week of live traces as incomplete.
+
+### Hosting options and what they cost
+
+Every figure is an **estimate** from the source and date beside it. Prices change; confirm on the
+vendor's page before deciding. None of this is spent or committed.
+
+| Option | Estimated monthly cost | What it needs | Honest trade-off |
+|---|---|---|---|
+| **Langfuse Cloud, Hobby** | $0 (free, no card). 50k "units" a month, 30 days of data, 2 users. *Source: langfuse.com/pricing, 2026-10-13.* | The owner's Langfuse account and project keys. | The cheapest and quickest. A unit is any trace, span or score, so one answered question is roughly 6 units on the served arm (root, `retrieve.bm25`, `retrieve.dense`, `fuse`, `generate`, plus the trace), which is **on the order of 8,000 questions a month** before the cap. Traces go to a third party's cloud. Past the cap, ingestion stops or the next plan applies: Core is $29/month for 100k units and 90 days (same source). |
+| **Self-hosted Langfuse v3** on a small VM | About **$49/month** for a 2 vCPU / 8 GB VM (GCP `e2-standard-2`, us-central1, on demand, about $0.067/hour; third-party tracker, figures dated January 2026), **plus** disk, plus the owner's time to patch and back up it. The VM size is my estimate: Langfuse recommends at least 2 CPUs and 4 GB for its own containers alone (langfuse.com self-hosting docs, v4 page, 2026-10-13), and ClickHouse, Postgres and Redis run beside them. | A VM with Docker, a stable address and TLS in front, `tracing.compose.yml` adapted for non-loopback access. | Full control of where the data lives and how long it is kept. It is the most expensive and the most work, and it would cost more than the demo itself does. This repository's compose file is for local verification and binds to loopback; it is not a production deployment. |
+| **Arize Phoenix** on a small VM, with a persistent store | Roughly **$10 to $15/month** for a very small VM (my estimate by scaling the figure above down; not looked up), more if a managed Postgres is used. | One container, `arizephoenix/phoenix`, plus a disk or a database. | Lightest to run. **Cloud Run cannot host it usefully**: its filesystem is ephemeral, so traces would vanish on restart unless a persistent database is attached, at which point it is a VM again. Phoenix's UI is oriented to tracing and evaluation; it has no cost table of its own, so the `cost_usd` attribute shows as a plain number. |
+| **Arize AX Free** (hosted) | $0: 25k spans a month, 15 days of data. *Source: arize.com/pricing, 2026-10-13.* | An Arize account. | Smaller allowance than Langfuse Hobby (about 25k spans, so roughly 5,000 questions a month at 5 spans each) and a short window. |
+
+The honest default, if the owner wants live traces at no cost, is Langfuse Cloud Hobby with content
+capture off. The honest alternative, if the owner does not want trace metadata to leave their
+infrastructure, is a VM, and that is a recurring cost the demo has not had until now. **No choice has
+been made.**
+
+### Verifying it locally first
+
+`tracing.compose.yml` runs a self-hosted Langfuse on loopback with a headless first-run setup. It
+has not been started as part of building this. See the header of that file and the "Tracing"
+subsection of the README for the commands.

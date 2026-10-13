@@ -100,6 +100,11 @@ flowchart TB
     T -->|no| U["record as fabricated,<br/>strip from display"]
     T -->|yes| V["cited answer"]
 
+    X[["trace (optional, OTLP)<br/>per-stage spans · tokens · cost"]]
+    J -.spans.-> X
+    K -.spans.-> X
+    N -.spans.-> X
+
     R[["eval harness<br/>recall@k · nDCG · MRR<br/>citation validity · grounding<br/>refusal recall vs false refusal"]]
     J -.measures.-> R
     K -.measures.-> R
@@ -110,6 +115,10 @@ flowchart TB
 The pre-generation refusal gate that would sit between `K` and `L` — refuse cheaply when the
 top score is low — is implemented and **shipped off**, because it was measured and it does
 not work on this corpus. See §5.
+
+The dashed trace node `X` is optional and off by default: with an OTLP endpoint configured, each query
+becomes one trace with a span per stage, and nothing about retrieval or generation changes. See §6,
+"Tracing".
 
 ## 4. Key decisions & tradeoffs
 
@@ -1044,6 +1053,60 @@ applied. Both are kept because they characterise different layers.
 
 The OpenRouter key is bound as a Cloud Run secret via Secret Manager and is deliberately absent
 from the image, this repository and any command line.
+
+### Tracing (optional, off by default)
+
+A query can be traced: one OpenTelemetry trace per question, with a span for each stage
+(`rewrite`, `retrieve.bm25`, `retrieve.dense`, `fuse`, `rerank`, `generate`), the token counts of
+each model call, and a cost from the price table in `src/production_rag/pricing.py`. Every model this
+project has run is free, so every cost it reports is $0; a model that is not in the table has its cost
+left out and flagged rather than shown as zero. Both Langfuse and Arize Phoenix accept the export, so
+the code imports no vendor library.
+
+**Status.** The local instrumentation and the overhead harness are built. The overhead budget is
+registered in `NOTES.md` and **has not been measured yet**, so this README states no overhead figure.
+**The live Cloud Run service is unchanged and untraced**; tracing it is deferred pending a hosting and
+cost decision (options, estimated costs and privacy in [`space/DEPLOY.md`](space/DEPLOY.md)).
+
+Tracing is **off** unless an OTLP endpoint is configured, and when it is off the code path is a no-op
+that does not import OpenTelemetry. It also never changes a result: an error inside tracing is
+swallowed and logged once, and export runs on a background thread with a bounded timeout.
+
+| Variable | Effect |
+|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Turns tracing on and says where to send it. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Credentials, e.g. `Authorization=Basic <base64(public:secret)>` for Langfuse. |
+| `PRODUCTION_RAG_TRACING` | `1` forces tracing on, `0` forces it off. |
+| `PRODUCTION_RAG_TRACE_CONTENT` | `1` also exports the question, prompts and replies. **Off by default**: a question is user data. |
+
+Trace it locally against a self-hosted Langfuse (needs Docker; nothing here starts it for you):
+
+```bash
+cp tracing.env.example tracing.env       # then replace every REPLACE_ME value
+docker compose --env-file tracing.env -f tracing.compose.yml up -d --wait
+```
+
+Langfuse is then at <http://127.0.0.1:3000>, and spans go to `http://127.0.0.1:3000/api/public/otel`
+with Basic auth built from the project keys you put in `tracing.env`. Arize Phoenix is the lighter
+alternative: one container, endpoint `http://127.0.0.1:6006`. Then:
+
+```bash
+uv run --extra tracing --extra embed production-rag ask "how do I read a parquet file in duckdb?"
+```
+
+Two offline commands measure tracing itself; neither makes a live LLM call.
+
+```bash
+uv run production-rag cache import
+uv run --extra tracing --extra embed production-rag trace-replay -n 10
+uv run --extra tracing --extra embed production-rag trace-bench --otlp-endpoint http://127.0.0.1:3000/api/public/otel
+```
+
+`trace-replay` runs the whole pipeline on cached LLM and rerank results (a cache miss is an error) and
+writes a per-stage breakdown with tokens and cost to `eval/results/tracing_stages.json`; the durations of
+the LLM and rerank stages in it are cache reads, and the latency recorded when each call was first made is
+kept beside them. `trace-bench` times the same retrieval with tracing off, on with an in-memory exporter,
+and on with OTLP export, interleaved per question, and applies the budget registered in `NOTES.md`.
 
 ### Reproducing the evaluation
 
