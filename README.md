@@ -846,6 +846,93 @@ generalisable one. Had the signal gate been met it would have broken the 5-point
 > section had four independent reviews, mutation testing of every new gate and zero live retries by
 > design.
 
+### Agentic retrieval — measured, no gain for its cost
+
+**Question.** "Agentic RAG" is usually claimed to beat a fixed pipeline. Does a bounded loop that
+asks a model whether the retrieved evidence is enough, and searches again when it is not, retrieve
+better than the fixed `hybrid_score_weighted` pipeline on this project's own questions, and what does
+the iteration cost? The loop, the judge prompt, the pass rule and the validity gates were registered
+before any judge prompt reached a model ([NOTES.md](NOTES.md), "Agentic retrieval arm: registered
+protocol"), and "no gain for its cost" was an allowed result.
+
+**The loop.** Step 1 is the fixed pipeline's own top 10. A judge (`qwen2.5-coder:7b-instruct-q3_K_M`,
+temperature 0, local Ollama) reads the question and the top 5 passages and replies either
+`{"sufficient": true}` or a new search query. A new query is retrieved with the same pipeline and
+fused with every earlier list by equal-weight RRF. At most three judge calls; if the last valid reply
+still says "insufficient", or the judge repeats a query, the loop refuses. Retrieval only: no tools,
+no answer drafting, and it is an evaluation arm, not part of the served pipeline.
+
+| `heading`, 177 scored questions | fixed pipeline | agentic loop | Δ (95% paired bootstrap) |
+|---|---:|---:|---:|
+| **nDCG@10** (registered primary) | 0.658 | 0.667 | **+0.009** (−0.002 to +0.023) |
+| recall@5 | 0.706 | 0.723 | +0.017 (0.000 to +0.040) |
+| MRR | 0.631 | 0.639 | +0.008 (−0.005 to +0.023) |
+
+| | fixed pipeline | agentic loop |
+|---|---:|---:|
+| LLM calls per question | 0 | 1.30 |
+| prompt / completion tokens per question | 0 | 1,462 / 25 |
+| latency per question, p50 / p95 | 35 ms / 64 ms | 57 s / 175 s |
+| false refusal, 54 answerable questions of the answer subset | 8/54 | **12/54** |
+| refusal recall, 6 unanswerable | 6/6 | 6/6 |
+
+**Registered verdict: no gain for its cost.** The pass rule needed Δ nDCG@10 ≥ +0.02 with an interval
+above zero *and* at most two extra false refusals. The interval includes zero, and the loop added four
+false refusals, so it fails on both counts. All four validity gates passed (step 1 reproduced the
+fixed pipeline's top 10 on 184 of 184 questions, every call was answered by the registered model, no
+invalid judge replies, largest prompt under the 8,192-token window).
+
+#### What the loop actually did
+
+**1. It rarely changed anything, and when it did the effect was small and mixed.** The judge called
+the evidence sufficient on the first look for 143 of 184 questions, so those rankings are the fixed
+pipeline's by construction. Of the 36 scored questions that iterated, nDCG@10 went up on 6, down on 3
+and was unchanged on 27; recall@5 improved on 3 and fell on none. The whole recall@5 gain is three
+questions.
+
+**2. The gain sits where §5 says rewriting helps.** Conceptual questions moved from 0.590 to 0.604
+nDCG@10 and 0.632 to 0.657 recall@5; exact-terminology questions did not move (0.867 vs 0.865). The
+four hand-written cross-tool questions, the case a second hop was supposed to fix, all iterated and
+all stayed at **0.000**. A 7B judge's follow-up query did not find the second tool's passage any more
+than the rewrite arm did.
+
+**3. The judge's "insufficient" is informative, its "sufficient" is not strict enough.** On step 1,
+27 of the 36 questions it called insufficient really had no gold chunk in the top 5; 24 of the 141 it
+called sufficient also had none. So a re-query is aimed at the right questions most of the time, but
+the loop never gets a chance on a sixth of the misses.
+
+**4. The real cost is refusals, not latency.** The loop refused 23 of 178 answerable questions,
+and 5 of those already had a gold chunk in the top 5. On the 60-question answer subset that turned 5
+answered questions into refusals and recovered 1, so false refusal rose from 8/54 to 12/54. Grounding
+did not move (21 of the 41 questions both arms answered are grounded in both). A loop that is allowed
+to say "not enough evidence" will say it, and a refusal is the expensive failure in a documentation
+assistant.
+
+> **Caveats.** One local 7B judge at 3-bit quantisation, one corpus, one run. Latency is per request
+> with four concurrent requests on a CPU machine, and other jobs shared the machine for part of the
+> run, so the absolute seconds are generous; the comparison with a 35 ms retrieval would not change at
+> any plausible speed-up. Prompt-token counts are as reported by Ollama and may undercount a reused
+> prompt prefix (prompt characters are recorded beside them). A stronger judge could change the
+> refusal side; that would be a new registered experiment, not a rerun. Reproduce offline with
+> `production-rag agentic-run --replay --out <file>` (the shipped bundle answers every call); the
+> live run is `agentic-run` (Ollama, about 75 minutes).
+
+### Against a framework implementation — LlamaIndex, measured elsewhere
+
+A separate, pre-registered comparison (run in a private trials repository, config locked before the
+run) rebuilt LlamaIndex's dense, BM25 and RRF-hybrid retrievers over the same 22,789 `heading`
+chunks and 177 scored questions. This project's own arms reproduced their published numbers on a
+fresh machine to within 0.00005. On the registered metric, recall@10, no difference was detected for
+any pair (dense +0.000, identical top 10 on 171 of 184; BM25 +0.025, −0.011 to +0.065; hybrid +0.000,
+−0.028 to +0.028), and only dense is inside a ±0.02 equivalence band, so this is "no difference
+detected", not "equivalent". The hybrid pair's non-deciding nDCG@10 (−0.023) and MRR (−0.031) favoured
+this project's hybrid. **A follow-up decomposition (exploratory, same 177 questions) traced about two
+thirds of that ranking gap to LlamaIndex merging candidates by a hash of text plus metadata instead of
+by chunk id**, which collapses chunks with duplicate text and pushed a gold chunk down on 7 questions
+(merge-key effect on nDCG@10 −0.015, −0.028 to −0.003). The BM25 tokeniser, the leading suspect, was
+not distinguishable from zero (−0.008, −0.027 to +0.012), the RRF rank offset contributed nothing, and
+recall@10 was unaffected.
+
 ## 6. How to run
 
 ```bash

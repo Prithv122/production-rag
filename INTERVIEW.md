@@ -318,6 +318,31 @@ validity gate, zero live retries by design, four independent reviews that caught
 before a single generation (one attack had no gold chunk to sit next to, and a failed baseline
 could still have let a defence qualify), and mutation tests on every gate.
 
+### Q11. Did you try agentic RAG? Doesn't a retrieval loop beat a fixed pipeline?
+
+_A:_ I tested it on this project's own questions instead of assuming it, and on this setup it
+didn't pay. Before any model call I registered the loop and a pass rule: the loop takes the fixed
+pipeline's top 10, a local 7B model judges whether the top 5 passages are enough, and if not it
+writes a new search query, which is retrieved and fused with the earlier lists. At most three judge
+calls, and if the last one still says "not enough" it refuses. To count as a gain it needed +0.02
+nDCG@10 with an interval above zero, and no more than two extra false refusals on the answer set.
+
+It got +0.009 nDCG@10, with an interval from −0.002 to +0.023, so I can't tell it from zero. The
+judge stopped on the first look for 143 of 184 questions, and of the 36 scored questions that did
+iterate, six got better and three got worse. The small gain was all on conceptual questions, which
+matches what I'd already seen with query rewriting. The four cross-tool questions, the case a second
+hop is supposed to fix, all iterated and all stayed at zero.
+
+The cost side is what decided it. Each question took 1.3 model calls and about a minute on local
+hardware, against 35 milliseconds for the fixed pipeline. And the loop refused more: false refusals
+went from 8 to 12 out of 54, and five of the answerable questions it gave up on already had the right
+passage in the top 5. So the registered verdict is "no gain for its cost".
+
+Two things I'd keep from it. The judge's "insufficient" was actually informative, right 27 times in
+36, so the signal for when to search again exists; what hurt was letting the same judge refuse. And
+I'd only claim this for a 3-bit 7B judge on one corpus. A stronger judge, or a loop that can search
+again but not refuse, would be a new registered experiment, not a rerun.
+
 ---
 
 ## 30-second pitch

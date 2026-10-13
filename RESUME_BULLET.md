@@ -96,6 +96,13 @@ Form: **action → technical specifics → measured outcome.** Numbers or it doe
   signal" and no defence was credited; the one finding reported was the citation filter's cost,
   **8/54 to 13/54** false refusals (paired p = 0.06), not a mitigation win.
 
+- Tested the "agentic RAG beats a fixed pipeline" claim on the project's own 177-question eval with a
+  pre-registered rule: a bounded loop where a local 7B judge checks whether the top 5 passages suffice
+  and re-queries (at most three calls), against the fixed weighted-fusion pipeline. Result **no gain
+  for its cost**: nDCG@10 **+0.009** (95% interval −0.002 to +0.023) for **1.3 LLM calls and ~57 s per
+  question vs 35 ms**, and false refusals rose **8/54 to 12/54**; the judge's "insufficient" was right
+  27 times in 36, but the loop never fixed a cross-tool question.
+
 ## Which roles this supports
 
 - [ ] Data Scientist / ML

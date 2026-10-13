@@ -1843,3 +1843,49 @@ turn a silent build-time default into the registered or a safer behaviour. No mo
 Also changed: the fast tests grew by the cases above, and a second round of hand-made faults (tie key,
 shutdown mode, error stop, digest check, baseline check, fallback switch, attempt count) each fail a
 test.
+
+## Agentic retrieval arm: result, no gain for its cost (2026-10-13)
+
+The run was made once, on the registered protocol (`4523723`) and the harness cleared by the fresh
+review (`dc42e63`, recorded by the run, `git_dirty false`). The result file is
+`eval/results/agentic.json`, committed exactly as written by `agentic-run` and not edited. The replay
+bundle `eval/cache/agentic_llm.jsonl` (267 entries) reproduces the verdict, every retrieval and answer
+number and all four gates with no model (`agentic-run --replay`); only the baseline's own millisecond
+retrieval timing differs between runs, as it is measured live.
+
+**Verdict under the registered rule: no gain for its cost.** Δ nDCG@10 +0.0089 (95% paired bootstrap
+−0.0021 to +0.0225, n = 177) is below the +0.02 bar and its interval includes zero; independently, the
+refusal guardrail fails (false refusal 8/54 → 12/54 against an allowed rise of 2; refusal recall 6/6 in
+both arms). Secondary, descriptive: recall@5 +0.0169 (0.0000 to +0.0395), MRR +0.0080 (−0.0045 to
++0.0230).
+
+**Run conditions.** 184 questions, 245 judge calls (1: 143 questions, 2: 21, 3: 20), 24 answer
+generations (41 ties reused the published row, 5 changed, 14 loop-refused), 4,314 s with four workers,
+zero provider errors, zero invalid judge replies, zero fallbacks, model digest `bb739a02927e` (the same
+weights as the injection run). Gates 1–4 passed. Per scored question: 1.30 judge calls, 1,462 prompt
+tokens (6,031 characters), 25 completion tokens; loop latency p50 57.4 s, p95 175.0 s against the
+baseline's 35 ms / 64 ms. Other jobs used the machine during part of the run (a CPU embedding pass in
+another repository and the start of a local tracing stack), so the latency figures are generous; the
+protocol did not register a quiet-machine gate for this run, and no verdict depends on latency.
+
+**What the result shows.**
+- The judge stopped at step 1 on 143 of 184 questions. Of the 36 scored questions that iterated,
+  nDCG@10 rose on 6, fell on 3, and was unchanged on 27; recall@5 rose on 3 and fell on none. The
+  aggregate gain is a handful of questions.
+- By category: conceptual 0.590 → 0.604 nDCG@10 and 0.632 → 0.657 recall@5; exact_term 0.867 → 0.865
+  and 0.933 unchanged; cross_tool (n = 4) iterated on all four and stayed at 0.000. The second hop did
+  not reach the second tool's passage.
+- Judge calibration at step 1 (gold chunk in the top 5): "sufficient" 117 with gold, 24 without;
+  "insufficient" 9 with gold, 27 without. "Insufficient" is informative (27 of 36 had no gold);
+  "sufficient" let 24 misses through without a second look.
+- Refusals: the loop refused 23 of 178 answerable questions (18 conceptual, 3 exact_term, 2
+  cross_tool) and 5 of 6 unanswerable ones; 5 of the refused answerable questions already had a gold
+  chunk in the final top 5. On the answer subset, 5 answerable questions were newly refused and 1 newly
+  answered. Of the 41 questions both arms answered, 21 were grounded in both, 1 only in the baseline,
+  0 only in the loop. Citation validity 1.000 in both.
+
+**What it does not show.** One 3-bit 7B judge, one corpus, one run. It does not say agentic retrieval
+cannot help: a stronger judge, a loop that may not refuse, or a different fusion of the follow-up
+lists are all untested and would each be a new registered experiment, not a rerun of this one. It
+does say that on this project, with this model, the loop's main measurable effect is extra refusals
+at more than a thousand times the latency.
