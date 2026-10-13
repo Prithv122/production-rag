@@ -1016,6 +1016,17 @@ uv sync --extra embed
 uv run production-rag semcache-sweep --out eval/results/semcache.json
 ```
 
+The agentic retrieval arm is an evaluation arm only; the served pipeline is unchanged. It needs the
+dense index, the `embed` extra and a local Ollama that lists the model used in the answer table. The
+dry run loads the inputs, checks every first-step ranking against the committed retrieval table and
+prints the call budget, without calling a model. The run writes `eval/results/agentic.json` once and
+refuses to overwrite it:
+
+```bash
+uv run --extra embed production-rag agentic-run --dry-run
+uv run --extra embed production-rag agentic-run
+```
+
 **Verified, not asserted.** The answer table above was reproduced from a *fresh* cache built
 only from the committed bundle, with `OPENROUTER_API_KEY=""` and `OLLAMA_HOST` pointed at a
 dead port — identical figures to the live run, so nothing in it depends on a key, a quota or
