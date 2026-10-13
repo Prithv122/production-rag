@@ -1276,7 +1276,23 @@ def format_report(result: dict[str, Any]) -> str:
             f"refusal recall {g['refusal_recall']['baseline']} -> "
             f"{g['refusal_recall']['agentic']} of {g['refusal_recall']['n']}; guardrail "
             f"{'holds' if g['holds'] else 'FAILS'}",
+            "",
+            "| answers | refusal recall | false refusal | grounded | citation validity |",
+            "|---|---:|---:|---:|---:|",
         ]
+        for arm in ("baseline", "agentic"):
+            row = a[arm]
+            lines.append(
+                f"| {arm} | {row['refusal_recall']:.3f} | {row['false_refusal']:.3f} | "
+                f"{row['grounded']:.3f} | {row['citation_validity']:.3f} |"
+            )
+        p = a["paired"]
+        lines.append(
+            f"paired: {p['newly_refused']} answerable newly refused, {p['newly_answered']} newly "
+            f"answered; of {p['answered_by_both']} answered by both, grounded in both "
+            f"{p['grounded_in_both']}, only baseline {p['grounded_only_baseline']}, only agentic "
+            f"{p['grounded_only_agentic']}"
+        )
     lines.append("")
     for gate in result["gates"]:
         lines.append(f"gate {gate['id']} {'ok  ' if gate['passed'] else 'FAIL'} {gate['name']}")

@@ -664,6 +664,15 @@ def test_a_gain_scenario_runs_end_to_end_and_the_verdict_is_a_gain():
     json.dumps(ag.pair_records(pairs))
 
 
+def test_the_report_prints_the_paired_answer_table_gates_and_the_verdict():
+    world = World()
+    result, *_ = finish(world)
+    report = ag.format_report(result)
+    assert "| answers | refusal recall | false refusal | grounded | citation validity |" in report
+    assert "| baseline |" in report and "| agentic |" in report and "paired:" in report
+    assert report.count("gate ") == 4 and report.rstrip().endswith(result["verdict_text"])
+
+
 def test_the_loops_and_the_steps_distribution_are_what_the_rules_give():
     world = World()
     _, _, loops, _, _ = finish(world)
