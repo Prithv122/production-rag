@@ -486,7 +486,7 @@ def generate(
                 json_object=json_object,
             )
             span.record(response)
-            span.check_answer(response.text)
+            span.check_answer(response)
         # The reply is not always usable, and it fails two different ways that
         # need two different remedies. See `_retry_kwargs`, which carries the
         # measurements. Exactly one retry: a loop here would turn a bad model
@@ -522,7 +522,7 @@ def generate(
                     **retry,
                 )
                 span.record(response)
-                span.check_answer(response.text)
+                span.check_answer(response)
     except ProviderError as exc:
         logger.warning("refusing (provider_error) for %r: %s", question[:80], str(exc)[:200])
         return Answer(

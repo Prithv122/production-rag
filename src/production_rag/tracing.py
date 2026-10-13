@@ -143,7 +143,7 @@ class _Null:
     def failure(self, kind: str, **attrs: Any) -> None:
         return None
 
-    def check_answer(self, text: str) -> None:
+    def check_answer(self, response: Any) -> None:
         return None
 
 
@@ -454,13 +454,14 @@ class _Live:
         """Mark a failure the code already classified; the call itself did not raise."""
         self.set(**{"failure_kind": kind, "langfuse.observation.level": "WARNING"}, **attrs)
 
-    def check_answer(self, text: str) -> None:
+    def check_answer(self, response: Any) -> None:
         """Classify a reply the answer path will treat as unusable (runs only when tracing)."""
-        if self.span is None:
-            return
+        if self.span is None or str(response.finish_reason) == "length":
+            return  # a truncated reply is already marked by `record`
         try:
             from .providers import extract_json
 
+            text = response.text
             try:
                 payload = extract_json(text)
             except ValueError:
