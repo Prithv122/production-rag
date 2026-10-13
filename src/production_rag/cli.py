@@ -38,6 +38,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from . import tracing
 from .answers import DEFAULT_OUT as ANSWER_RESULTS_OUT
 from .answers import DEFAULT_RESULTS as ANSWER_RESULTS_IN
 from .answers import DEFAULT_SUBSET, FROZEN_ARM, FROZEN_STRATEGY
@@ -446,28 +447,30 @@ def cmd_ask(args: argparse.Namespace) -> int:
         embedder=_embedder(args) if spec.semantic else None,
         with_dense=spec.semantic,
     )
-    result = retriever.retrieve(
-        args.question,
-        arm=args.arm,
-        k=args.k,
-        pool=args.pool,
-        reranker=_reranker(args) if spec.rerank else None,
-        rewriter=provider if spec.needs_llm else None,
-    )
-    top_score = result.ranked[0][1] if result.ranked else None
-    # The budget is asked of the arm rather than hard-coded, because on a
-    # reasoning model `max_tokens` is shared with the thinking trace. See
-    # `providers.answer_budget`.
-    answer = generate(
-        args.question,
-        result.chunk_ids,
-        retriever.chunks,
-        provider,
-        top_score=top_score,
-        min_top_score=args.min_top_score,
-        sentences=args.sentences,
-        max_tokens=answer_budget(args.model_arm, DEFAULT_ANSWER_TOKENS),
-    )
+    # One trace per question: retrieval and generation are children of the same root.
+    with tracing.query(args.question, arm=args.arm, k=args.k, strategy=args.strategy):
+        result = retriever.retrieve(
+            args.question,
+            arm=args.arm,
+            k=args.k,
+            pool=args.pool,
+            reranker=_reranker(args) if spec.rerank else None,
+            rewriter=provider if spec.needs_llm else None,
+        )
+        top_score = result.ranked[0][1] if result.ranked else None
+        # The budget is asked of the arm rather than hard-coded, because on a
+        # reasoning model `max_tokens` is shared with the thinking trace. See
+        # `providers.answer_budget`.
+        answer = generate(
+            args.question,
+            result.chunk_ids,
+            retriever.chunks,
+            provider,
+            top_score=top_score,
+            min_top_score=args.min_top_score,
+            sentences=args.sentences,
+            max_tokens=answer_budget(args.model_arm, DEFAULT_ANSWER_TOKENS),
+        )
     print(format_answer(answer))
     if args.show_context:
         print("\nRetrieved\n" + retriever.format(result))

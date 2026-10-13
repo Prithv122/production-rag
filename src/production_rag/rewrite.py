@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import tracing
 from .providers import LLMProvider, ProviderError, extract_json
 
 MODES = ("replace", "expand")
@@ -114,21 +115,39 @@ def rewrite_query(
 
     prompt = REWRITE_TEMPLATE.format(n=n, query=query)
     try:
-        response = provider.complete(
-            prompt,
-            system=REWRITE_SYSTEM,
+        with tracing.llm_span(
+            "rewrite",
+            provider=provider,
             temperature=0.0,
             max_tokens=max_tokens,
             json_object=structured,
-        )
+            prompt=prompt,
+            mode=mode,
+            n=n,
+        ) as span:
+            response = provider.complete(
+                prompt,
+                system=REWRITE_SYSTEM,
+                temperature=0.0,
+                max_tokens=max_tokens,
+                json_object=structured,
+            )
+            span.record(response)
+            # Parsed inside the span so that an unusable reply is marked on the model call
+            # that produced it. The outcome is unchanged: the same two results come back.
+            variants: list[str] = []
+            parse_error: ValueError | None = None
+            try:
+                variants = _parse_variants(response.text, n)
+            except ValueError as exc:
+                parse_error = exc
+                span.failure("unparseable")
     except ProviderError as exc:
         return RewriteResult(query, mode=mode, parsed=False, error=str(exc)[:300])
 
-    try:
-        variants = _parse_variants(response.text, n)
-    except ValueError as exc:
+    if parse_error is not None:
         return RewriteResult(
-            query, mode=mode, parsed=False, cached=response.cached, error=str(exc)[:300]
+            query, mode=mode, parsed=False, cached=response.cached, error=str(parse_error)[:300]
         )
 
     return RewriteResult(query, tuple(variants), mode=mode, cached=response.cached)

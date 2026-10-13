@@ -37,6 +37,7 @@ from pathlib import Path
 import gradio as gr
 from huggingface_hub import snapshot_download
 
+from production_rag import tracing
 from production_rag.generate import (
     DEFAULT_ANSWER_TOKENS,
     generate,
@@ -127,13 +128,21 @@ def run(question: str, arm: str, k: int, rerank: bool, answer_it: bool):
     question = (question or "").strip()
     if not question:
         return "Ask something.", "", []
+    # One trace per question, covering retrieval and generation. A no-op unless an OTLP
+    # endpoint is configured (see DEPLOY.md, "Tracing"); the question text is only
+    # exported when PRODUCTION_RAG_TRACE_CONTENT=1.
+    with tracing.query(question, arm=arm, k=k, strategy=STRATEGY, rerank=rerank) as root:
+        return _answer(question, arm, k, rerank, answer_it, root)
 
+
+def _answer(question: str, arm: str, k: int, rerank: bool, answer_it: bool, root):
     reranker = None
     if rerank:
         from production_rag.rerank import CrossEncoderReranker
 
         reranker = CrossEncoderReranker()
         arm = "hybrid_rerank"
+        root.set(arm=arm)
 
     result = RETRIEVER.retrieve(question, arm=arm, k=k, reranker=reranker)
     table = []
@@ -162,6 +171,12 @@ def run(question: str, arm: str, k: int, rerank: bool, answer_it: bool):
         # shared with the thinking trace, and 700 is spent before the answer
         # starts. That is what broke generation on the first two revisions.
         max_tokens=answer_budget(MODEL_ARM, DEFAULT_ANSWER_TOKENS),
+    )
+    root.set(
+        refused=answer.refused,
+        refusal_reason=answer.refusal_reason or None,
+        n_citations=len(answer.citations),
+        model_arm=MODEL_ARM,
     )
     logger.info(
         "q=%r arm=%s refused=%s reason=%s citations=%d latency=%.1fs error=%s",

@@ -45,6 +45,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import tracing
 from .bm25 import BM25Index
 from .chunking import USES_BREADCRUMB, Chunk
 from .dense import DenseIndex, Embedder
@@ -186,6 +187,33 @@ class Retriever:
         rewriter=None,
         rewrite_n: int = 2,
     ) -> RetrievalResult:
+        # The trace root. A caller that also generates opens `tracing.query` itself, so
+        # generation lands in the same trace; this call then joins it. Off, this is a
+        # shared do-nothing object.
+        with tracing.query(query, arm=arm, k=k, strategy=self.strategy, pool=pool) as root:
+            result = self._retrieve(
+                query,
+                arm=arm,
+                k=k,
+                pool=pool,
+                reranker=reranker,
+                rewriter=rewriter,
+                rewrite_n=rewrite_n,
+            )
+            root.set(pool_size=result.pool_size, n_queries=len(result.queries))
+            return result
+
+    def _retrieve(
+        self,
+        query: str,
+        *,
+        arm: str,
+        k: int,
+        pool: int,
+        reranker: Reranker | None,
+        rewriter,
+        rewrite_n: int,
+    ) -> RetrievalResult:
         try:
             spec = ARMS[arm]
         except KeyError:
@@ -211,12 +239,15 @@ class Retriever:
 
         mark = time.perf_counter()
         rankings: list[list[tuple[str, float]]] = []
-        for sub_query in queries:
+        for index, sub_query in enumerate(queries):
             if spec.lexical:
-                rankings.append(self.bm25.search(sub_query, k=pool))
+                with tracing.stage("retrieve.bm25", query_index=index, top_k=pool):
+                    rankings.append(self.bm25.search(sub_query, k=pool))
             if spec.semantic:
                 assert self.dense is not None and self.embedder is not None
-                rankings.append(self.dense.search(sub_query, self.embedder, k=pool))
+                # The span covers the query embedding as well as the matrix product.
+                with tracing.stage("retrieve.dense", query_index=index, top_k=pool):
+                    rankings.append(self.dense.search(sub_query, self.embedder, k=pool))
         stage["first_stage"] = time.perf_counter() - mark
 
         if len(rankings) == 1:
@@ -226,19 +257,23 @@ class Retriever:
             # to 10 before reranking would throw away exactly the candidates the
             # reranker exists to rescue.
             weights = list(spec.weights) * (len(rankings) // max(len(spec.weights), 1)) or None
-            candidates = fuse(rankings, spec.fusion, k=pool, weights=weights)
+            with tracing.stage("fuse", fusion=spec.fusion, n_lists=len(rankings)):
+                candidates = fuse(rankings, spec.fusion, k=pool, weights=weights)
 
         pool_size = len(candidates)
         if spec.rerank:
             mark = time.perf_counter()
-            ranked = rerank_candidates(
-                query,
-                candidates,
-                self.chunks,
-                reranker,
-                k=k,
-                with_breadcrumb=self.with_breadcrumb,
-            )
+            with tracing.stage(
+                "rerank", reranker=getattr(reranker, "name", ""), n_candidates=len(candidates)
+            ):
+                ranked = rerank_candidates(
+                    query,
+                    candidates,
+                    self.chunks,
+                    reranker,
+                    k=k,
+                    with_breadcrumb=self.with_breadcrumb,
+                )
             stage["rerank"] = time.perf_counter() - mark
         else:
             ranked = candidates[:k]

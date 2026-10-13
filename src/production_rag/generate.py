@@ -65,6 +65,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import tracing
 from .chunking import Chunk
 from .providers import (
     LLMProvider,
@@ -468,13 +469,24 @@ def generate(
     prompt = build_prompt(question, passages, sentences=sentences)
     started = time.perf_counter()
     try:
-        response = provider.complete(
-            prompt,
-            system=ANSWER_SYSTEM,
+        with tracing.llm_span(
+            "generate",
+            provider=provider,
             temperature=0.0,
             max_tokens=max_tokens,
             json_object=json_object,
-        )
+            prompt=prompt,
+            n_passages=len(passages),
+        ) as span:
+            response = provider.complete(
+                prompt,
+                system=ANSWER_SYSTEM,
+                temperature=0.0,
+                max_tokens=max_tokens,
+                json_object=json_object,
+            )
+            span.record(response)
+            span.check_answer(response.text)
         # The reply is not always usable, and it fails two different ways that
         # need two different remedies. See `_retry_kwargs`, which carries the
         # measurements. Exactly one retry: a loop here would turn a bad model
@@ -493,12 +505,24 @@ def generate(
                 retry,
                 question[:80],
             )
-            response = provider.complete(
-                prompt,
-                system=ANSWER_SYSTEM,
+            with tracing.llm_span(
+                "generate",
+                provider=provider,
                 temperature=0.0,
-                **retry,
-            )
+                max_tokens=retry["max_tokens"],
+                json_object=retry["json_object"],
+                prompt=prompt,
+                n_passages=len(passages),
+                retry=True,
+            ) as span:
+                response = provider.complete(
+                    prompt,
+                    system=ANSWER_SYSTEM,
+                    temperature=0.0,
+                    **retry,
+                )
+                span.record(response)
+                span.check_answer(response.text)
     except ProviderError as exc:
         logger.warning("refusing (provider_error) for %r: %s", question[:80], str(exc)[:200])
         return Answer(
