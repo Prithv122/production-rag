@@ -1,0 +1,184 @@
+# Self-hosted Langfuse (v3 line), for verifying traces locally. Not part of the app:
+# nothing in the retrieval or serving path reads it, and nothing in CI starts it.
+#
+#   cd to the repository root, then
+#   copy tracing.env.example tracing.env      # and replace every REPLACE_ME value
+#   docker compose --env-file tracing.env -f tracing.compose.yml up -d --wait
+#   -> UI at http://127.0.0.1:3000, sign in with the LANGFUSE_INIT_USER_* values
+#   docker compose --env-file tracing.env -f tracing.compose.yml down        # keep the data
+#   docker compose --env-file tracing.env -f tracing.compose.yml down -v     # delete the data
+#
+# Point the app (or `trace-bench --otlp-endpoint`) at
+#   http://127.0.0.1:3000/api/public/otel
+# with HTTP Basic auth built from the project's public and secret key; the exact
+# variables are in tracing.env.example.
+#
+# Every published port is bound to 127.0.0.1. Upstream's compose publishes the web UI
+# and MinIO on all interfaces; this one does not, so nothing here is reachable from
+# another machine. The services talk to each other on the compose network.
+#
+# Every image is pinned to an exact tag (MinIO to a digest, because the only free
+# image of it publishes `latest` alone). Secrets come from tracing.env (untracked);
+# an unset required variable stops the stack rather than falling back to a default.
+#
+# Written from upstream's docker-compose.yml at the v3.225.11 tag. It has been checked
+# for syntax, not run: bringing it up is a separate step.
+#
+# Lighter alternative with no database stack: Arize Phoenix, one container,
+#   docker run --rm -p 127.0.0.1:6006:6006 docker.io/arizephoenix/phoenix:version-20.21.2
+# OTLP/HTTP endpoint http://127.0.0.1:6006 (traces go to /v1/traces). It keeps traces
+# in the container unless given a volume, so it suits a look, not a record.
+
+x-langfuse-env: &langfuse-env
+  NEXTAUTH_URL: http://127.0.0.1:3000
+  DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/postgres
+  SALT: ${SALT:?set SALT}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY (64 hex characters)}
+  TELEMETRY_ENABLED: "false"
+  CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+  CLICKHOUSE_URL: http://clickhouse:8123
+  CLICKHOUSE_USER: clickhouse
+  CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_AUTH: ${REDIS_AUTH:?set REDIS_AUTH}
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://127.0.0.1:9090
+  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+
+services:
+  langfuse-web:
+    image: docker.io/langfuse/langfuse:3.225.11
+    restart: unless-stopped
+    depends_on: &depends
+      postgres: {condition: service_healthy}
+      minio: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET}
+      # Headless initialisation: creates the organisation, project, API keys and first
+      # user on first start, so no clicking through the UI is needed. All from tracing.env.
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/api/public/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  langfuse-worker:
+    image: docker.io/langfuse/langfuse-worker:3.225.11
+    restart: unless-stopped
+    depends_on: *depends
+    ports:
+      - "127.0.0.1:3030:3030"
+    environment:
+      <<: *langfuse-env
+
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:25.12.11
+    restart: unless-stopped
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    ports:
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9000:9000"
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    # Pinned by digest: the free image publishes only `latest`, which moves.
+    image: cgr.dev/chainguard/minio@sha256:dc455cdd4db6e390b1b26514f15ff37681a777bf8dab41aac445a0259f751e56
+    restart: unless-stopped
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:9090:9000"
+      - "127.0.0.1:9091:9001"
+    volumes:
+      - langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+      start_period: 3s
+
+  redis:
+    image: docker.io/redis:7.4.11
+    restart: unless-stopped
+    command: --requirepass ${REDIS_AUTH:?set REDIS_AUTH} --maxmemory-policy noeviction
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - langfuse_redis_data:/data
+    environment:
+      REDIS_AUTH: ${REDIS_AUTH:?set REDIS_AUTH}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_AUTH\" --no-auth-warning ping | grep -q PONG"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+  postgres:
+    image: docker.io/postgres:17.11
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  langfuse_postgres_data:
+  langfuse_clickhouse_data:
+  langfuse_clickhouse_logs:
+  langfuse_minio_data:
+  langfuse_redis_data:

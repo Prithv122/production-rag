@@ -30,6 +30,9 @@ build/
 
 .env
 .env.local
+tracing.env
+tracing.compose.yml
+tracing.env.example
 *.pem
 
 .DS_Store

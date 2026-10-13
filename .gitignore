@@ -1,6 +1,7 @@
 # Environments & secrets
 .env
 .env.local
+tracing.env
 *.pem
 secrets/
 
