@@ -1380,6 +1380,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_component_args(answer_eval)
     answer_eval.set_defaults(func=cmd_answer_eval)
 
+    from .tracebench import register as register_tracing
+
+    register_tracing(subparsers, _add_component_args, INDEX_DIR)
+
     stats = subparsers.add_parser("stats", help="corpus and index shape")
     stats.add_argument("--docs", type=Path, default=DOCS_PATH)
     stats.add_argument("--indexes", type=Path, default=INDEX_DIR)
