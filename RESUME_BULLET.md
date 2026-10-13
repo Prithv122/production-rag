@@ -103,6 +103,13 @@ Form: **action → technical specifics → measured outcome.** Numbers or it doe
   question vs 35 ms**, and false refusals rose **8/54 to 12/54**; the judge's "insufficient" was right
   27 times in 36, but the loop never fixed a cross-tool question.
 
+- Added OpenTelemetry tracing across rewrite, retrieval, rerank and generation (GenAI token usage,
+  per-call cost, failure kinds, Langfuse generation attributes), off by default, content capture off,
+  and isolated so a failing exporter cannot alter a request; measured it against a budget registered
+  first: OTLP export to self-hosted **Langfuse v3** added **0.90 ms p50** to a 31.4 ms query (limit
+  1.57 ms), with **4,416/4,416** spans accepted. Traces flagged every replayed rewrite as a silent
+  provider fallback, the misattribution an earlier cache audit had found by hand.
+
 ## Which roles this supports
 
 - [ ] Data Scientist / ML

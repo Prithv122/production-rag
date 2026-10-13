@@ -926,6 +926,52 @@ assistant.
 > `production-rag agentic-run --replay --out <file>` (the shipped bundle answers every call); the
 > live run is `agentic-run` (Ollama, about 75 minutes).
 
+### Tracing — measured overhead, local only
+
+**What it is.** Every query can emit an OpenTelemetry trace: a root `rag.query` span with one child per
+stage (rewrite, BM25, dense, fusion, rerank, generate). LLM steps carry the model, token counts, a
+cost from a price table and any failure kind (`fallback`, `unparseable`, `truncated`), in the
+attribute names Langfuse reads as generations. It is off unless an OTLP endpoint is configured, it
+exports no question, passage or answer text unless `PRODUCTION_RAG_TRACE_CONTENT=1`, and every
+tracing call is guarded so a broken exporter cannot change or fail a request (tests break each
+OpenTelemetry call in turn and point the exporter at a closed port).
+
+**Overhead, against a budget registered before measuring** ([NOTES.md](NOTES.md), "Tracing:
+registered overhead budget"): tracing passes if it adds at most max(1 ms, 5% of the untraced p50) to
+the p50 query latency. Offline `hybrid_score_weighted` / `heading` retrieval, 184 questions × 5
+repeats, the three conditions interleaved per query, spans exported over OTLP/HTTP to a self-hosted
+Langfuse v3 stack in local Docker (`tracing.compose.yml`):
+
+| condition | p50 | p95 | added p50 | added p95 |
+|---|---:|---:|---:|---:|
+| tracing off | 31.44 ms | 64.61 ms | — | — |
+| on, in-memory exporter | 32.48 ms | 67.36 ms | 1.04 ms | 2.75 ms |
+| **on, OTLP to Langfuse** | 32.34 ms | 67.13 ms | **0.90 ms** | 2.53 ms |
+
+**Verdict: pass** (0.90 ms against a 1.57 ms limit). All 4,416 spans of the OTLP condition were
+accepted by Langfuse, none failed, and the batch exporter's background thread used 0.31 ms of CPU
+per query. Under interleaving that thread can run during the untraced samples too, so its cost is
+reported beside the latency rather than folded into it. The quiet-machine gate (30 one-second CPU
+samples, mean under 15%, max under 40%, no model runner) failed the first attempt at a 15.2% mean,
+with Langfuse's ClickHouse idling at about two thirds of a core, and passed the second at 14.96%.
+The margin is small, so the absolute milliseconds are this machine's, not a general figure.
+
+**What a trace shows.** Replaying ten questions through the full rewrite → hybrid → rerank →
+generate pipeline from the committed cache (`trace-replay`, `eval/results/tracing_stages.json`):
+dense retrieval is the slowest local stage (median 109 ms, the query embedding on CPU), BM25 3 ms,
+fusion and the replayed rerank about 1 ms. The LLM stages replay from cache, so their spans carry the
+latency recorded when each call was first made: rewrite median 47 s, generation median 115 s, about
+2,300 prompt tokens and 65 completion tokens per answer, $0 because every model used is free. Every
+replayed rewrite span is flagged `fallback`: the request named the hosted model and the local one
+answered. That is the misattribution the correction in "Reranking and query rewriting" found by
+auditing the cache by hand; with tracing on it is visible on the first trace.
+
+> **Scope, stated plainly.** This is local instrumentation and a local overhead measurement. The
+> live Cloud Run service is unchanged and is **not traced**: hosting a trace backend is a cost and
+> data-retention decision that has not been made, and the options with estimated costs and the
+> privacy trade-offs are in [space/DEPLOY.md](space/DEPLOY.md). Turning it on there needs the `tracing`
+> extra in the image and environment variables, no code change.
+
 ### Against a framework implementation — LlamaIndex, measured elsewhere
 
 A separate, pre-registered comparison (run in a private trials repository, config locked before the

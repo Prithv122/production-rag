@@ -343,6 +343,30 @@ Two things I'd keep from it. The judge's "insufficient" was actually informative
 I'd only claim this for a 3-bit 7B judge on one corpus. A stronger judge, or a loop that can search
 again but not refuse, would be a new registered experiment, not a rerun.
 
+### Q12. How would you observe this in production? What does tracing cost you?
+
+_A:_ Each query emits an OpenTelemetry trace: a root span and one child per stage, with the LLM steps
+carrying the model, token counts, a cost from a price table and a failure kind like "fallback". I
+used plain OpenTelemetry rather than a vendor SDK, so the same exporter feeds Langfuse or Phoenix,
+and I set the attribute names Langfuse reads so it shows the LLM steps as generations with cost.
+
+Two rules came first. It's off unless an endpoint is configured, and it never exports the question,
+passages or answer unless you opt in, because on a public demo that's user data. And tracing can't
+break a request: every call into the tracing library is guarded, and the tests break each one in turn
+and point the exporter at a closed port to check the answer comes back unchanged.
+
+For cost, I registered a budget before measuring: at most 1 ms or 5% of the untraced p50, whichever
+is larger. Exporting to a self-hosted Langfuse in Docker added 0.9 ms at p50 to a 31 ms query, under
+the 1.57 ms limit, and Langfuse accepted all 4,416 spans. I also report the exporter thread's CPU
+separately, because with the conditions interleaved it can land in the untraced samples.
+
+The part I'd point to is what the first trace showed: every replayed rewrite was flagged as a
+fallback, meaning the request named the hosted model and the local one answered. I'd found that
+earlier by auditing the cache by hand and had to correct a published attribution. With tracing on it
+would have been visible on day one. What isn't done is the live deployment: hosting a trace backend
+is a cost and data-retention decision, so the live app stays untraced, and the options and costs are
+written down.
+
 ---
 
 ## 30-second pitch

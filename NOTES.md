@@ -2115,3 +2115,42 @@ is pending; **live Cloud Run tracing** is deferred. P-13 as a whole is not compl
 `OTEL_EXPORTER_OTLP_HEADERS` to `Authorization=Basic <base64(public:secret)>`, then run `trace-bench` with
 `--otlp-endpoint http://127.0.0.1:3000/api/public/otel` and **without** `--skip-quiet-gate`. If the gate fails, wait and
 repeat; do not skip it.
+
+## Tracing: result, overhead within budget; live tracing deferred (2026-10-14)
+
+**Outcome split, as registered.** P-13 local instrumentation and overhead evaluation: complete.
+Live Cloud Run tracing: deferred pending a hosting and cost decision. The live service is unchanged
+and untraced. P-13 as a whole is not complete.
+
+**Measurement.** `trace-bench`, run once to completion on commit `70e1060` (clean tree), result
+`eval/results/tracing_overhead.json` committed unedited. 184 questions x 5 repeats x 3 interleaved
+conditions, OTLP/HTTP export to the local Langfuse v3 stack (`tracing.compose.yml`, images as pinned
+there) on `127.0.0.1:3000`. Untraced p50 31.440 ms, p95 64.606 ms; in-memory exporter +1.041 ms p50,
++2.751 ms p95; OTLP to Langfuse +0.895 ms p50, +2.525 ms p95. Budget max(1 ms, 5% x 31.440) =
+1.572 ms: **pass**. Spans: 4,416 expected, 4,416 exported, 0 failed, for each traced condition. Export
+worker CPU 0.34 s in total, 0.311 ms per query, reported beside the latency and not subtracted.
+
+**The gate.** The first attempt stopped at the quiet-machine gate before measuring (mean 15.2%, max
+22.4%, no busy model process); nothing was written. The Langfuse ClickHouse container was the largest
+single load (about 64% of one core in a `docker stats` snapshot) while otherwise idle. After a
+five-minute wait the second attempt passed at mean 14.96% (shown rounded as 15.0 in the file; the
+comparison uses the unrounded value) and max 24.2%. The machine was therefore only just quiet by the
+registered definition, which is stated wherever the result is quoted.
+
+**Stage breakdown (descriptive, not a budget).** `trace-replay -n 10` on commit `35a8a59`, exported
+to the same Langfuse instance, result `eval/results/tracing_stages.json`. Medians per question: dense
+retrieval 109.4 ms (three queries, original plus two rewrites), BM25 3.1 ms, fusion 0.5 ms, replayed
+rerank 1.1 ms. LLM spans are cache reads; the latency recorded at first call is carried as an
+attribute: rewrite median 46.9 s (198 prompt / 38 completion tokens), generation median 114.7 s
+(about 2,295 / 65). All cost $0 (free models). All ten replayed rewrites are flagged `fallback`.
+
+**End-to-end ingestion check.** Langfuse's public API, queried after the runs, returned the traces as
+`rag.query` with child observations named after the stages, the LLM stages typed `GENERATION` with
+model, usage (`input`, `output`, `total`) and cost details, `input`/`output` empty (content capture
+off), and the fallback rewrites at level `WARNING`. One compose defect was found and fixed while
+doing this: the web container's healthcheck was refused because Next.js binds to the container
+hostname (`HOSTNAME: "0.0.0.0"` added in `34beb8f`).
+
+**Not done.** No live deployment, no hosted backend, no retention policy chosen, no measurement of
+span loss under Cloud Run CPU throttling or of shutdown flush time (both documented as risks in
+`space/DEPLOY.md`). Langfuse v4 untested.

@@ -1,0 +1,732 @@
+{
+  "protocol": "trace-replay: descriptive stage breakdown, not a budget",
+  "arm": "rerank_rewrite",
+  "requested_arm": "rerank_rewrite",
+  "strategy": "heading",
+  "k": 10,
+  "pool": 50,
+  "n_questions": 10,
+  "rewrite_model_arm": "nemotron-super",
+  "answer_model_arm": "ollama-qwen-coder",
+  "generation_context": "frozen",
+  "generation_context_note": "frozen: the answer is generated from the hybrid_score_weighted top-k the answer table was recorded on, because no committed answer entry exists for the reranked context. Rewrite and rerank run on their own recorded entries.",
+  "rerank": "replayed from the committed rerank cache",
+  "timing_note": "LLM and rerank durations here are cache reads, not model latency. The latency recorded when each call was first made is in llm[].recorded_latency_s.",
+  "environment": {
+    "python": "3.12.13",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "cpu_count": 12,
+    "commit": "35a8a5967a4c3faa5b782ad92e6c76084158af6f",
+    "dirty": false,
+    "note": "CPU load is not recorded here; the quiet-machine gate is checked separately"
+  },
+  "rows": [
+    {
+      "qid": "q0003-dagster-conceptual",
+      "category": "conceptual",
+      "wall_s": 0.7071044000331312,
+      "n_spans": 11,
+      "stages": {
+        "rewrite": {
+          "n": 1,
+          "total_s": 0.0
+        },
+        "retrieve.bm25": {
+          "n": 3,
+          "total_s": 0.0037292
+        },
+        "retrieve.dense": {
+          "n": 3,
+          "total_s": 0.16152450000000002
+        },
+        "fuse": {
+          "n": 1,
+          "total_s": 0.0
+        },
+        "rerank": {
+          "n": 1,
+          "total_s": 0.0011412
+        },
+        "generate": {
+          "n": 1,
+          "total_s": 0.0005077
+        }
+      },
+      "llm": [
+        {
+          "span": "rewrite",
+          "provider": "ollama",
+          "model": "qwen2.5:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 196,
+          "completion_tokens": 35,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0,
+          "recorded_latency_s": 34.75436370000534,
+          "failure_kind": "fallback"
+        },
+        {
+          "span": "generate",
+          "provider": "ollama",
+          "model": "qwen2.5-coder:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 1687,
+          "completion_tokens": 47,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0005077,
+          "recorded_latency_s": 94.76200539999991,
+          "failure_kind": null
+        }
+      ],
+      "prompt_tokens": 1883,
+      "completion_tokens": 82,
+      "cost_usd": 0.0,
+      "recorded_cost_usd": 0.0,
+      "cost_unknown_calls": 0,
+      "refused": false,
+      "refusal_reason": "",
+      "n_citations": 1
+    },
+    {
+      "qid": "q0007-duckdb-conceptual",
+      "category": "conceptual",
+      "wall_s": 0.41868539998540655,
+      "n_spans": 11,
+      "stages": {
+        "rewrite": {
+          "n": 1,
+          "total_s": 0.0005318
+        },
+        "retrieve.bm25": {
+          "n": 3,
+          "total_s": 0.0038483999999999997
+        },
+        "retrieve.dense": {
+          "n": 3,
+          "total_s": 0.1178894
+        },
+        "fuse": {
+          "n": 1,
+          "total_s": 0.0003159
+        },
+        "rerank": {
+          "n": 1,
+          "total_s": 0.0016338
+        },
+        "generate": {
+          "n": 1,
+          "total_s": 0.0020217
+        }
+      },
+      "llm": [
+        {
+          "span": "rewrite",
+          "provider": "ollama",
+          "model": "qwen2.5:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 197,
+          "completion_tokens": 44,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0005318,
+          "recorded_latency_s": 45.521223899995675,
+          "failure_kind": "fallback"
+        },
+        {
+          "span": "generate",
+          "provider": "ollama",
+          "model": "qwen2.5-coder:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 2094,
+          "completion_tokens": 57,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0020217,
+          "recorded_latency_s": 42.44467270000314,
+          "failure_kind": null
+        }
+      ],
+      "prompt_tokens": 2291,
+      "completion_tokens": 101,
+      "cost_usd": 0.0,
+      "recorded_cost_usd": 0.0,
+      "cost_unknown_calls": 0,
+      "refused": false,
+      "refusal_reason": "",
+      "n_citations": 1
+    },
+    {
+      "qid": "q0011-duckdb-conceptual",
+      "category": "conceptual",
+      "wall_s": 0.4314411000232212,
+      "n_spans": 11,
+      "stages": {
+        "rewrite": {
+          "n": 1,
+          "total_s": 0.000516
+        },
+        "retrieve.bm25": {
+          "n": 3,
+          "total_s": 0.0039132
+        },
+        "retrieve.dense": {
+          "n": 3,
+          "total_s": 0.1181896
+        },
+        "fuse": {
+          "n": 1,
+          "total_s": 0.0005338
+        },
+        "rerank": {
+          "n": 1,
+          "total_s": 0.0016269
+        },
+        "generate": {
+          "n": 1,
+          "total_s": 0.0010612
+        }
+      },
+      "llm": [
+        {
+          "span": "rewrite",
+          "provider": "ollama",
+          "model": "qwen2.5:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 206,
+          "completion_tokens": 33,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.000516,
+          "recorded_latency_s": 45.08514300000388,
+          "failure_kind": "fallback"
+        },
+        {
+          "span": "generate",
+          "provider": "ollama",
+          "model": "qwen2.5-coder:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 2660,
+          "completion_tokens": 69,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0010612,
+          "recorded_latency_s": 129.9539233999967,
+          "failure_kind": null
+        }
+      ],
+      "prompt_tokens": 2866,
+      "completion_tokens": 102,
+      "cost_usd": 0.0,
+      "recorded_cost_usd": 0.0,
+      "cost_unknown_calls": 0,
+      "refused": false,
+      "refusal_reason": "",
+      "n_citations": 1
+    },
+    {
+      "qid": "q0012-duckdb-conceptual",
+      "category": "conceptual",
+      "wall_s": 0.41859140002634376,
+      "n_spans": 11,
+      "stages": {
+        "rewrite": {
+          "n": 1,
+          "total_s": 0.0005451
+        },
+        "retrieve.bm25": {
+          "n": 3,
+          "total_s": 0.0021807
+        },
+        "retrieve.dense": {
+          "n": 3,
+          "total_s": 0.1092207
+        },
+        "fuse": {
+          "n": 1,
+          "total_s": 0.0005551
+        },
+        "rerank": {
+          "n": 1,
+          "total_s": 0.0010813
+        },
+        "generate": {
+          "n": 1,
+          "total_s": 0.001083
+        }
+      },
+      "llm": [
+        {
+          "span": "rewrite",
+          "provider": "ollama",
+          "model": "qwen2.5:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 199,
+          "completion_tokens": 42,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0005451,
+          "recorded_latency_s": 46.49861169999349,
+          "failure_kind": "fallback"
+        },
+        {
+          "span": "generate",
+          "provider": "ollama",
+          "model": "qwen2.5-coder:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 1670,
+          "completion_tokens": 97,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.001083,
+          "recorded_latency_s": 74.2195791000122,
+          "failure_kind": null
+        }
+      ],
+      "prompt_tokens": 1869,
+      "completion_tokens": 139,
+      "cost_usd": 0.0,
+      "recorded_cost_usd": 0.0,
+      "cost_unknown_calls": 0,
+      "refused": false,
+      "refusal_reason": "",
+      "n_citations": 1
+    },
+    {
+      "qid": "q0017-dagster-conceptual",
+      "category": "conceptual",
+      "wall_s": 0.4461820000433363,
+      "n_spans": 11,
+      "stages": {
+        "rewrite": {
+          "n": 1,
+          "total_s": 0.0010834
+        },
+        "retrieve.bm25": {
+          "n": 3,
+          "total_s": 0.0028699
+        },
+        "retrieve.dense": {
+          "n": 3,
+          "total_s": 0.1216875
+        },
+        "fuse": {
+          "n": 1,
+          "total_s": 0.000546
+        },
+        "rerank": {
+          "n": 1,
+          "total_s": 0.0011034
+        },
+        "generate": {
+          "n": 1,
+          "total_s": 0.0010867
+        }
+      },
+      "llm": [
+        {
+          "span": "rewrite",
+          "provider": "ollama",
+          "model": "qwen2.5:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 197,
+          "completion_tokens": 36,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0010834,
+          "recorded_latency_s": 51.562035500013735,
+          "failure_kind": "fallback"
+        },
+        {
+          "span": "generate",
+          "provider": "ollama",
+          "model": "qwen2.5-coder:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 2709,
+          "completion_tokens": 56,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0010867,
+          "recorded_latency_s": 121.24498540000059,
+          "failure_kind": null
+        }
+      ],
+      "prompt_tokens": 2906,
+      "completion_tokens": 92,
+      "cost_usd": 0.0,
+      "recorded_cost_usd": 0.0,
+      "cost_unknown_calls": 0,
+      "refused": false,
+      "refusal_reason": "",
+      "n_citations": 0
+    },
+    {
+      "qid": "q0019-duckdb-conceptual",
+      "category": "conceptual",
+      "wall_s": 0.33921960002044216,
+      "n_spans": 11,
+      "stages": {
+        "rewrite": {
+          "n": 1,
+          "total_s": 0.0
+        },
+        "retrieve.bm25": {
+          "n": 3,
+          "total_s": 0.0026734
+        },
+        "retrieve.dense": {
+          "n": 3,
+          "total_s": 0.0878684
+        },
+        "fuse": {
+          "n": 1,
+          "total_s": 0.0005467
+        },
+        "rerank": {
+          "n": 1,
+          "total_s": 0.0010778
+        },
+        "generate": {
+          "n": 1,
+          "total_s": 0.001085
+        }
+      },
+      "llm": [
+        {
+          "span": "rewrite",
+          "provider": "ollama",
+          "model": "qwen2.5:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 193,
+          "completion_tokens": 28,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0,
+          "recorded_latency_s": 47.30896270000085,
+          "failure_kind": "fallback"
+        },
+        {
+          "span": "generate",
+          "provider": "ollama",
+          "model": "qwen2.5-coder:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 2314,
+          "completion_tokens": 21,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.001085,
+          "recorded_latency_s": 111.34817699999257,
+          "failure_kind": null
+        }
+      ],
+      "prompt_tokens": 2507,
+      "completion_tokens": 49,
+      "cost_usd": 0.0,
+      "recorded_cost_usd": 0.0,
+      "cost_unknown_calls": 0,
+      "refused": true,
+      "refusal_reason": "model",
+      "n_citations": 0
+    },
+    {
+      "qid": "q0025-dagster-exact_term",
+      "category": "exact_term",
+      "wall_s": 0.42261349997716025,
+      "n_spans": 11,
+      "stages": {
+        "rewrite": {
+          "n": 1,
+          "total_s": 0.000537
+        },
+        "retrieve.bm25": {
+          "n": 3,
+          "total_s": 0.0032388999999999994
+        },
+        "retrieve.dense": {
+          "n": 3,
+          "total_s": 0.10828159999999999
+        },
+        "fuse": {
+          "n": 1,
+          "total_s": 0.0
+        },
+        "rerank": {
+          "n": 1,
+          "total_s": 0.0010181
+        },
+        "generate": {
+          "n": 1,
+          "total_s": 0.0011546
+        }
+      },
+      "llm": [
+        {
+          "span": "rewrite",
+          "provider": "ollama",
+          "model": "qwen2.5:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 199,
+          "completion_tokens": 40,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.000537,
+          "recorded_latency_s": 47.352934099995764,
+          "failure_kind": "fallback"
+        },
+        {
+          "span": "generate",
+          "provider": "ollama",
+          "model": "qwen2.5-coder:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 2275,
+          "completion_tokens": 62,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0011546,
+          "recorded_latency_s": 119.98519849999866,
+          "failure_kind": null
+        }
+      ],
+      "prompt_tokens": 2474,
+      "completion_tokens": 102,
+      "cost_usd": 0.0,
+      "recorded_cost_usd": 0.0,
+      "cost_unknown_calls": 0,
+      "refused": false,
+      "refusal_reason": "",
+      "n_citations": 2
+    },
+    {
+      "qid": "q0027-dbt-conceptual",
+      "category": "conceptual",
+      "wall_s": 0.38060370000312105,
+      "n_spans": 11,
+      "stages": {
+        "rewrite": {
+          "n": 1,
+          "total_s": 0.0010876
+        },
+        "retrieve.bm25": {
+          "n": 3,
+          "total_s": 0.0037581999999999997
+        },
+        "retrieve.dense": {
+          "n": 3,
+          "total_s": 0.1092268
+        },
+        "fuse": {
+          "n": 1,
+          "total_s": 0.0005344
+        },
+        "rerank": {
+          "n": 1,
+          "total_s": 0.0012785
+        },
+        "generate": {
+          "n": 1,
+          "total_s": 0.0016317
+        }
+      },
+      "llm": [
+        {
+          "span": "rewrite",
+          "provider": "ollama",
+          "model": "qwen2.5:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 198,
+          "completion_tokens": 40,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0010876,
+          "recorded_latency_s": 47.9460487000033,
+          "failure_kind": "fallback"
+        },
+        {
+          "span": "generate",
+          "provider": "ollama",
+          "model": "qwen2.5-coder:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 2324,
+          "completion_tokens": 67,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0016317,
+          "recorded_latency_s": 116.43068689999927,
+          "failure_kind": null
+        }
+      ],
+      "prompt_tokens": 2522,
+      "completion_tokens": 107,
+      "cost_usd": 0.0,
+      "recorded_cost_usd": 0.0,
+      "cost_unknown_calls": 0,
+      "refused": false,
+      "refusal_reason": "",
+      "n_citations": 2
+    },
+    {
+      "qid": "q0029-dbt-conceptual",
+      "category": "conceptual",
+      "wall_s": 0.3802735000499524,
+      "n_spans": 11,
+      "stages": {
+        "rewrite": {
+          "n": 1,
+          "total_s": 0.0011125
+        },
+        "retrieve.bm25": {
+          "n": 3,
+          "total_s": 0.0026695
+        },
+        "retrieve.dense": {
+          "n": 3,
+          "total_s": 0.1095478
+        },
+        "fuse": {
+          "n": 1,
+          "total_s": 0.0
+        },
+        "rerank": {
+          "n": 1,
+          "total_s": 0.0016587
+        },
+        "generate": {
+          "n": 1,
+          "total_s": 0.0011832
+        }
+      },
+      "llm": [
+        {
+          "span": "rewrite",
+          "provider": "ollama",
+          "model": "qwen2.5:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 202,
+          "completion_tokens": 42,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0011125,
+          "recorded_latency_s": 47.70038329999079,
+          "failure_kind": "fallback"
+        },
+        {
+          "span": "generate",
+          "provider": "ollama",
+          "model": "qwen2.5-coder:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 1923,
+          "completion_tokens": 87,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0011832,
+          "recorded_latency_s": 112.89447949999885,
+          "failure_kind": null
+        }
+      ],
+      "prompt_tokens": 2125,
+      "completion_tokens": 129,
+      "cost_usd": 0.0,
+      "recorded_cost_usd": 0.0,
+      "cost_unknown_calls": 0,
+      "refused": false,
+      "refusal_reason": "",
+      "n_citations": 0
+    },
+    {
+      "qid": "q0030-dbt-conceptual",
+      "category": "conceptual",
+      "wall_s": 0.4143813999835402,
+      "n_spans": 11,
+      "stages": {
+        "rewrite": {
+          "n": 1,
+          "total_s": 0.0005594
+        },
+        "retrieve.bm25": {
+          "n": 3,
+          "total_s": 0.0026950999999999998
+        },
+        "retrieve.dense": {
+          "n": 3,
+          "total_s": 0.0944093
+        },
+        "fuse": {
+          "n": 1,
+          "total_s": 0.0026597
+        },
+        "rerank": {
+          "n": 1,
+          "total_s": 0.0010655
+        },
+        "generate": {
+          "n": 1,
+          "total_s": 0.0010596
+        }
+      },
+      "llm": [
+        {
+          "span": "rewrite",
+          "provider": "ollama",
+          "model": "qwen2.5:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 198,
+          "completion_tokens": 25,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0005594,
+          "recorded_latency_s": 46.181830600005924,
+          "failure_kind": "fallback"
+        },
+        {
+          "span": "generate",
+          "provider": "ollama",
+          "model": "qwen2.5-coder:7b-instruct-q3_K_M",
+          "cached": true,
+          "prompt_tokens": 2939,
+          "completion_tokens": 77,
+          "cost_usd": 0.0,
+          "recorded_cost_usd": 0.0,
+          "cost_known": true,
+          "replayed_read_s": 0.0010596,
+          "recorded_latency_s": 132.15408249999746,
+          "failure_kind": null
+        }
+      ],
+      "prompt_tokens": 3137,
+      "completion_tokens": 102,
+      "cost_usd": 0.0,
+      "recorded_cost_usd": 0.0,
+      "cost_unknown_calls": 0,
+      "refused": false,
+      "refusal_reason": "",
+      "n_citations": 1
+    }
+  ],
+  "totals": {
+    "prompt_tokens": 24580,
+    "completion_tokens": 1005,
+    "cost_usd": 0.0,
+    "recorded_cost_usd": 0.0,
+    "cost_unknown_calls": 0
+  }
+}
