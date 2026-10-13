@@ -198,6 +198,37 @@ def test_merge_is_rrf_with_k_60_and_a_single_list_is_returned_untouched():
     assert ids_of(merged) == ["y", "x", "z"]
 
 
+def test_ties_go_to_the_original_list_first_not_to_chunk_id_order():
+    original = ranking([f"z{i}" for i in range(50)])
+    new = ranking([f"a{i}" for i in range(50)])
+    merged = ids_of(ag.merge_rankings([original, new]))
+    # Chunk-id order would put every "a" chunk before its tied "z" partner.
+    assert merged[:8] == ["z0", "a0", "z1", "a1", "z2", "a2", "z3", "a3"]
+    third = ranking([f"m{i}" for i in range(50)])
+    assert ids_of(ag.merge_rankings([original, new, third]))[:6] == [
+        "z0",
+        "a0",
+        "m0",
+        "z1",
+        "a1",
+        "m1",
+    ]
+
+
+def test_a_tie_between_different_rank_patterns_goes_to_the_earlier_list_then_the_better_rank():
+    # x is 1st in A and 2nd in B; y is 2nd in A and 1st in B: exactly the same score.
+    merged = ag.merge_rankings([ranking(["x", "y"]), ranking(["y", "x"])])
+    assert dict(merged)["x"] == dict(merged)["y"]
+    assert ids_of(merged) == ["x", "y"]  # x was ranked first by the original list
+    # Sorted by chunk id instead, "a" would win; here it is the original's rank 2.
+    assert ids_of(ag.merge_rankings([ranking(["m", "a"]), ranking(["z"])]))[:2] == ["m", "z"]
+
+
+def test_the_fusion_used_by_the_other_arms_is_unchanged():
+    one, two = ranking(["z", "q"]), ranking(["a", "p"])
+    assert ids_of(reciprocal_rank_fusion([one, two], k=60))[:2] == ["a", "z"]  # chunk-id ties
+
+
 def test_merge_over_three_lists_counts_every_list_once():
     lists = [ranking(["x", "p"]), ranking(["q", "x"]), ranking(["r", "x"])]
     scores = dict(ag.merge_rankings(lists))
@@ -619,6 +650,7 @@ class World:
 
     def provider(self, **kwargs) -> RuleProvider:
         kwargs.setdefault("model", MODEL)
+        kwargs.setdefault("name", "ollama")  # the real provider's name, so cache keys match
         return RuleProvider(self.judge, self.answer, **kwargs)
 
 
@@ -1071,6 +1103,79 @@ def test_the_counting_provider_counts_calls_and_cache_hits_and_changes_nothing()
     assert counting.complete("y", system="s").text == "b"
     assert (counting.calls, counting.cached) == (2, 1)
     assert inner.prompts == ["x", "y"]
+
+
+def test_an_interrupt_cancels_the_work_not_yet_started_and_is_re_raised():
+    import time
+
+    started = []
+
+    def work(i):
+        started.append(i)
+        if i == 0:
+            raise KeyboardInterrupt
+        time.sleep(0.05)
+        return i
+
+    with pytest.raises(KeyboardInterrupt):
+        ag._map(work, list(range(60)), 2)
+    assert len(started) < 60
+
+
+def test_a_map_returns_results_in_order():
+    assert ag._map(lambda i: i * 2, list(range(10)), 3) == [i * 2 for i in range(10)]
+    assert ag._map(lambda i: i * 2, list(range(10)), 1) == [i * 2 for i in range(10)]
+
+
+def test_the_counting_provider_counts_failed_attempts_too():
+    inner = FakeProvider(fail=True, model=MODEL)
+    counting = ag.CountingProvider(inner)
+    with pytest.raises(ProviderError):
+        counting.complete("x")
+    assert (counting.attempts, counting.calls) == (1, 0)
+
+
+def test_baseline_metrics_difference_is_zero_on_the_tables_own_labels_and_not_otherwise():
+    from dataclasses import replace
+
+    world = World()
+    specs = world.inputs.specs
+    assert ag.baseline_metrics_difference(specs) == 0.0
+    wrong = [
+        replace(specs[0], stored_metrics={**specs[0].stored_metrics, "ndcg@10": 0.9}),
+        *specs[1:],
+    ]
+    assert ag.baseline_metrics_difference(wrong) > 0.1
+
+
+def test_provider_errors_are_counted_from_judge_steps_and_answer_rows():
+    world = World()
+    _step_one, loops, _ = run_world(world)
+    assert ag.count_provider_errors(loops) == {"judge": 0, "answers": 0}
+    loops["q0"].steps[0].invalid = "provider_error"
+    pair = ag.AnswerPair(
+        "q0", ag.CHANGED, answer_row("q0", model="", refused=True, reason="provider_error"),
+        answer_row("q0"), "live", "live",
+    )  # fmt: skip
+    assert ag.count_provider_errors(loops, [pair]) == {"judge": 1, "answers": 1}
+
+
+def test_the_cost_carries_prompt_characters_and_the_undercount_caveat():
+    world = World()
+    result, *_ = finish(world)
+    cost = result["cost"]["scored"]
+    assert cost["prompt_chars"]["total"] > 0 and cost["prompt_chars"]["max_prompt"] > 0
+    assert cost["note"] == ag.TOKEN_NOTE and "undercount" in cost["note"]
+    assert "note: prompt token counts are as reported by the server" in ag.format_report(result)
+
+
+def test_an_unexpected_table_is_named_in_the_error(tmp_path):
+    table = tmp_path / "retrieval.json"
+    table.write_text(json.dumps({"config": {"k": 10, "pool": 20}, "rows": []}), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"pool=20; the protocol fixes k=10, pool=50"):
+        ag.load_inputs(
+            {}, {}, questions_path=tmp_path / "q", results_path=table, answers_path=tmp_path / "a"
+        )
 
 
 def test_saving_is_all_or_nothing_and_never_overwrites(tmp_path):

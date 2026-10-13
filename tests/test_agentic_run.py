@@ -8,6 +8,7 @@ and an interrupted run must resume from the cache without asking the model the s
 
 from __future__ import annotations
 
+import argparse
 import json
 from types import SimpleNamespace
 
@@ -17,7 +18,7 @@ from production_rag import agentic as ag
 from production_rag import cli
 from production_rag.cache import JsonCache
 from production_rag.cli import main
-from production_rag.providers import CachedProvider
+from production_rag.providers import CachedProvider, OllamaProvider
 from test_agentic import MODEL, World
 
 
@@ -174,7 +175,7 @@ def test_the_shared_llm_cache_is_refused_because_it_may_hold_the_published_answe
     assert "published answers" in capsys.readouterr().err and stub.untouched
 
 
-def test_the_command_takes_no_model_choice_and_no_replay_flag():
+def test_the_command_takes_no_model_choice():
     options = {
         o
         for action in cli.build_parser()
@@ -183,8 +184,9 @@ def test_the_command_takes_no_model_choice_and_no_replay_flag():
         ._actions
         for o in action.option_strings
     }
-    assert "--model-arm" not in options and "--replay" not in options
-    assert {"--out", "--dry-run", "--workers", "--phase", "--allow-dirty"} <= options
+    assert "--model-arm" not in options
+    flags = {"--out", "--dry-run", "--workers", "--phase", "--allow-dirty"}
+    assert flags | {"--accept-provider-errors", "--replay", "--bundle"} <= options
 
 
 def test_the_default_cache_is_the_runs_own_and_the_default_workers_are_four():
@@ -278,18 +280,201 @@ def test_an_interrupted_answer_phase_resumes_without_repeating_any_call(tmp_path
     assert (tmp_path / "agentic.json").exists()
 
 
-def test_a_failed_generation_leaves_a_result_with_no_verdict_not_a_missing_file(
+def down(prompt):
+    raise ag.ProviderError("ollama is down")
+
+
+def test_failed_answer_calls_exit_non_zero_with_no_result_and_a_rerun_retries_only_those(
+    tmp_path, monkeypatch, capsys
+):
+    stub = Stub(monkeypatch, tmp_path)
+    original = stub.inner._answer
+    stub.inner._answer = down
+    assert command(tmp_path) == 1
+    err = capsys.readouterr().err
+    assert "provider errors: 10" in err
+    assert "rerun the same command to resume from the cache" in err
+    assert not (tmp_path / "agentic.json").exists()
+    judged = list(stub.judge_prompts)
+
+    stub.inner._answer = original  # the model is back
+    assert command(tmp_path) == 0
+    assert stub.judge_prompts == judged  # the judge was not asked again
+    saved = json.loads((tmp_path / "agentic.json").read_text("utf-8"))
+    assert saved["result"]["verdict"] == ag.GAIN
+    assert saved["config"]["provider_errors"] == {"judge": 0, "answers": 0}
+    assert saved["config"]["accept_provider_errors"] is False
+
+
+def test_failed_judge_calls_stop_the_run_before_the_answer_phase(tmp_path, monkeypatch, capsys):
+    stub = Stub(monkeypatch, tmp_path)
+    original = stub.inner._judge
+
+    def flaky(prompt):
+        if "question number 3?" in prompt:
+            raise ag.ProviderError("ollama is down")
+        return original(prompt)
+
+    stub.inner._judge = flaky
+    assert command(tmp_path) == 1
+    assert "provider errors: 1" in capsys.readouterr().err
+    assert stub.inner.answer_prompts() == [] and not (tmp_path / "agentic.json").exists()
+    stub.inner._judge = original
+    assert command(tmp_path) == 0  # resumed; only the failed question was asked again
+
+
+def test_accepting_provider_errors_finalises_with_the_registered_handling_and_records_it(
     tmp_path, monkeypatch
 ):
     stub = Stub(monkeypatch, tmp_path)
-
-    def down(prompt):
-        raise ag.ProviderError("ollama is down")
-
     stub.inner._answer = down
-    assert command(tmp_path) == 0
+    assert command(tmp_path, "--accept-provider-errors") == 0
     saved = json.loads((tmp_path / "agentic.json").read_text("utf-8"))
+    assert saved["config"]["accept_provider_errors"] is True
+    assert saved["config"]["provider_errors"] == {"judge": 0, "answers": 10}
     assert saved["result"]["verdict"] is None and "gate 2" in saved["result"]["verdict_text"]
+
+
+def test_a_failed_judge_call_accepted_fails_open_and_counts_in_gate_three(tmp_path, monkeypatch):
+    stub = Stub(monkeypatch, tmp_path)
+    stub.inner._judge = down
+    assert command(tmp_path, "--accept-provider-errors") == 0
+    saved = json.loads((tmp_path / "agentic.json").read_text("utf-8"))
+    assert saved["result"]["gates"][2]["by_kind"]["provider_error"] == 16
+    assert saved["result"]["verdict"] is None
+
+
+def test_the_live_provider_is_the_registered_local_model_with_no_fallback(tmp_path):
+    provider = cli._agentic_provider(argparse.Namespace(llm_cache=tmp_path / "c"))
+    assert type(provider) is CachedProvider and type(provider.inner) is OllamaProvider
+    assert provider.inner.num_ctx == 8192 == ag.NUM_CTX
+    assert provider.model == MODEL and provider.offline is False
+    assert provider.cache.root == tmp_path / "c" and not (tmp_path / "c").exists()
+
+
+def test_the_model_digest_is_pinned_to_the_cache_at_the_first_live_run(
+    tmp_path, monkeypatch, capsys
+):
+    stub = Stub(monkeypatch, tmp_path)
+    assert command(tmp_path, "--phase", "loop") == 0
+    marker = tmp_path / "c" / "model_digest.txt"
+    assert marker.read_text("utf-8").strip() == "sha256:test"
+    calls = len(stub.inner.prompts)
+    monkeypatch.setattr(cli, "_ollama_ready", lambda host, model: (None, "sha256:other"))
+    assert command(tmp_path, "--phase", "loop") == 1
+    assert "sha256:test" in capsys.readouterr().err and len(stub.inner.prompts) == calls
+    monkeypatch.setattr(cli, "_ollama_ready", lambda host, model: (None, "sha256:test"))
+    assert command(tmp_path, "--phase", "loop") == 0  # the same weights resume
+
+
+def test_a_model_with_no_digest_cannot_be_pinned(tmp_path):
+    with pytest.raises(ValueError, match="no digest"):
+        cli._check_model_digest(tmp_path, "")
+
+
+def test_the_marker_is_not_read_as_a_cache_entry_when_the_cache_is_exported(tmp_path):
+    cache = JsonCache(tmp_path / "c")
+    cache.put({"k": 1}, {"v": 1})
+    cli._check_model_digest(tmp_path / "c", "sha256:x")
+    assert cache.export_jsonl(tmp_path / "bundle.jsonl") == 1
+
+
+def test_a_baseline_that_does_not_match_the_tables_metrics_stops_the_run_before_any_call(
+    tmp_path, monkeypatch, capsys
+):
+    from dataclasses import replace
+
+    world = World()
+    specs = world.inputs.specs
+    bad = [
+        replace(specs[0], stored_metrics={**specs[0].stored_metrics, "ndcg@10": 0.9}),
+        *specs[1:],
+    ]
+    world.inputs = ag.Inputs(
+        bad, world.inputs.subset, world.inputs.published, world.chunks, world.inputs.by_doc
+    )
+    stub = Stub(monkeypatch, tmp_path, world=world)
+    assert command(tmp_path, "--dry-run") == 1
+    assert command(tmp_path) == 1
+    assert "baseline metrics" in capsys.readouterr().err and stub.untouched and stub.loaded == 0
+
+
+def test_the_result_records_the_inputs_and_every_argument(tmp_path, monkeypatch):
+    Stub(monkeypatch, tmp_path)
+    assert command(tmp_path, "--workers", "2") == 0
+    config = json.loads((tmp_path / "agentic.json").read_text("utf-8"))["config"]
+    assert set(config["inputs_sha256"]) == {"questions", "results", "answers"}
+    assert all(len(v) == 64 for v in config["inputs_sha256"].values())
+    assert config["args"]["workers"] == 2 and config["args"]["phase"] == "all"
+    assert config["args"]["llm_cache"] == str(tmp_path / "c") and "func" not in config["args"]
+    assert config["replay"] is False and config["bundle"] is None
+
+
+def test_an_answer_retry_is_counted_once_per_row_that_needed_it(tmp_path, monkeypatch):
+    stub = Stub(monkeypatch, tmp_path)
+    original, seen = stub.inner._answer, set()
+
+    def empty_first(prompt):
+        if prompt not in seen:
+            seen.add(prompt)
+            return "{}"  # valid JSON, no answer: `generate` retries once without JSON mode
+        return original(prompt)
+
+    stub.inner._answer = empty_first
+    assert command(tmp_path) == 0
+    config = json.loads((tmp_path / "agentic.json").read_text("utf-8"))["config"]
+    assert config["answer_generations"] == 10 and config["answer_retries"] == 10
+
+
+def test_the_agentic_cache_exports_to_a_bundle_the_run_can_replay_with_no_model(
+    tmp_path, monkeypatch, capsys
+):
+    assert cli.CACHES["agentic"] == (cli.AGENTIC_LLM_CACHE, cli.AGENTIC_BUNDLE)
+    assert str(cli.AGENTIC_BUNDLE).replace("\\", "/") == "eval/cache/agentic_llm.jsonl"
+    stub = Stub(monkeypatch, tmp_path)
+    assert command(tmp_path) == 0
+    first = json.loads((tmp_path / "agentic.json").read_text("utf-8"))
+    bundle = tmp_path / "agentic_llm.jsonl"
+    assert JsonCache(tmp_path / "llm-cache").export_jsonl(bundle) == len(stub.inner.prompts)
+
+    def never(*args, **kwargs):
+        raise AssertionError("a replay must not look for a model")
+
+    monkeypatch.setattr(cli, "_ollama_ready", never)
+    monkeypatch.setattr(cli, "_git_state", lambda: ("abc1234def", True))  # dirty: replay allows it
+    asked = len(stub.inner.prompts)
+    out = ["--out", str(tmp_path / "replayed.json"), "--bundle", str(bundle)]
+    assert main(["agentic-run", "--replay", *out]) == 0
+    assert len(stub.inner.prompts) == asked  # the fake model was never reached
+    replayed = json.loads((tmp_path / "replayed.json").read_text("utf-8"))
+    assert replayed["config"]["replay"] is True
+    assert replayed["config"]["judge_calls_from_cache"] == replayed["config"]["judge_calls"] == 32
+    assert replayed["result"]["verdict"] == first["result"]["verdict"] == ag.GAIN
+    assert replayed["result"]["retrieval"]["overall"] == first["result"]["retrieval"]["overall"]
+    assert replayed["result"]["answers"]["guardrail"] == first["result"]["answers"]["guardrail"]
+
+
+def test_a_replay_that_lacks_a_request_stops_and_writes_nothing(tmp_path, monkeypatch, capsys):
+    Stub(monkeypatch, tmp_path)
+    empty = tmp_path / "empty.jsonl"
+    empty.write_text("", encoding="utf-8")
+    out = ["--out", str(tmp_path / "replayed.json"), "--bundle", str(empty)]
+    assert main(["agentic-run", "--replay", *out]) == 1
+    assert "replay misses" in capsys.readouterr().err
+    assert not (tmp_path / "replayed.json").exists()
+    assert (
+        main(
+            [
+                "agentic-run",
+                "--replay",
+                "--out",
+                str(tmp_path / "r.json"),
+                "--bundle",
+                str(tmp_path / "gone"),
+            ]
+        )
+        == 1
+    )
 
 
 def test_a_failed_judge_run_is_counted_against_gate_three(tmp_path, monkeypatch):

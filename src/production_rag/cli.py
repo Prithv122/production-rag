@@ -61,6 +61,7 @@ EMBED_CACHE = Path(".cache/embeddings")
 RERANK_CACHE = Path(".cache/rerank")
 LLM_CACHE = Path(".cache/llm")
 AGENTIC_LLM_CACHE = Path(".cache/agentic-llm")
+AGENTIC_BUNDLE = Path("eval/cache/agentic_llm.jsonl")
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +571,7 @@ RERANK_BUNDLE = Path("eval/cache/rerank.jsonl")
 CACHES = {
     "llm": (LLM_CACHE, LLM_BUNDLE),
     "rerank": (RERANK_CACHE, RERANK_BUNDLE),
+    "agentic": (AGENTIC_LLM_CACHE, AGENTIC_BUNDLE),
 }
 
 
@@ -1006,6 +1008,46 @@ def _agentic_provider(args: argparse.Namespace):
     )
 
 
+def _agentic_replay_provider(args: argparse.Namespace):
+    """The same stack, offline, over a throwaway cache expanded from a committed bundle."""
+    from .agentic import MODEL_ARM, NUM_CTX
+    from .cache import JsonCache
+
+    replay_dir = Path(tempfile.mkdtemp(prefix="agentic-replay-"))
+    atexit.register(shutil.rmtree, replay_dir, True)
+    JsonCache(replay_dir).import_jsonl(args.bundle)  # no bundle: FileNotFoundError, a stop
+    return build_provider(
+        MODEL_ARM, cache_dir=replay_dir, offline=True, fallback=False, num_ctx=NUM_CTX
+    )
+
+
+DIGEST_MARKER = "model_digest.txt"
+
+
+def _check_model_digest(cache_dir: Path, digest: str) -> None:
+    """Pin the weights to the cache: record the model digest at the first live call and refuse a
+    resume under a different one. A `.txt` file, so a cache export never reads it as an entry."""
+    if not digest:
+        raise ValueError("the local model reports no digest, so its weights cannot be pinned")
+    marker = Path(cache_dir) / DIGEST_MARKER
+    if marker.exists():
+        recorded = marker.read_text(encoding="utf-8").strip()
+        if recorded != digest:
+            raise ValueError(
+                f"{cache_dir} was filled by model digest {recorded}, the local model is now "
+                f"{digest}; a resumed run must use the same weights (use a new --llm-cache)"
+            )
+    else:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(digest + "\n", encoding="utf-8")
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
 def _agentic_plan_lines(ag, inputs, step_one, plan) -> list[str]:
     """What a run would do, from step one alone: sizes, call budget, baseline latency."""
     scored = [s for s in inputs.specs if s.scored]
@@ -1059,7 +1101,8 @@ def cmd_agentic_run(args: argparse.Namespace) -> int:
         if not args.dry_run and args.phase == "all" and args.out.exists():
             raise FileExistsError(f"{args.out} already exists; the run is made once")
         commit, dirty = _git_state()
-        if dirty and not args.dry_run and not args.allow_dirty:
+        live = not args.dry_run and not args.replay
+        if dirty and live and not args.allow_dirty:
             raise ValueError("the working tree is not clean (commit first, or pass --allow-dirty)")
         if Path(args.llm_cache).resolve() == LLM_CACHE.resolve():
             raise ValueError(
@@ -1074,12 +1117,20 @@ def cmd_agentic_run(args: argparse.Namespace) -> int:
             results_path=args.results,
             answers_path=args.answers,
         )
-        provider = _agentic_provider(args)
+        baseline_diff = ag.baseline_metrics_difference(inputs.specs)
+        if baseline_diff > 1e-9:
+            raise ValueError(
+                f"the baseline metrics recomputed from the stored rankings differ from the "
+                f"stored ones by {baseline_diff:.3g}; the labels are not the table's"
+            )
+        provider = _agentic_replay_provider(args) if args.replay else _agentic_provider(args)
         expected = MODEL_ARMS[ag.MODEL_ARM]["model"]
         if provider.model != expected:
             raise ValueError(f"provider is {provider.model!r}, registered model is {expected!r}")
-        problem, digest = _ollama_ready(provider.inner.host, provider.model)
-        if problem and not args.dry_run:
+        problem, digest = (
+            (None, "") if args.replay else _ollama_ready(provider.inner.host, provider.model)
+        )
+        if problem and live:
             raise ValueError(problem)
         args.embed_cache = None  # queries only; the document vectors are in the index
         retriever = Retriever.load(
@@ -1110,8 +1161,29 @@ def cmd_agentic_run(args: argparse.Namespace) -> int:
         print(f"ollama: {problem or 'lists ' + provider.model}")
         print("dry run: no language-model call was made")
         return 0
+    if live:
+        try:
+            _check_model_digest(args.llm_cache, digest)
+        except ValueError as exc:
+            print(f"agentic-run: {exc}", file=sys.stderr)
+            return 1
 
     counting = ag.CountingProvider(provider)
+    miss = "replay misses" if args.replay else "provider errors"
+
+    def stop_on_errors(pairs=None) -> int:
+        """Exit code 1 and no result file if any call failed, unless the failures are accepted.
+        A failed call is never cached, so rerunning the command retries only those calls."""
+        errors = ag.count_provider_errors(loops, pairs)
+        if sum(errors.values()) and not args.accept_provider_errors:
+            print(
+                f"agentic-run: {miss}: {sum(errors.values())} {errors}; "
+                "rerun the same command to resume from the cache",
+                file=sys.stderr,
+            )
+            return 1
+        return 0
+
     done = 0
 
     def progress(item) -> None:
@@ -1127,6 +1199,8 @@ def cmd_agentic_run(args: argparse.Namespace) -> int:
             workers=args.workers, progress=progress,
         )  # fmt: skip
         timings["loop_s"] = round(time.time() - started, 1)
+        if stop_on_errors():
+            return 1
         if args.phase == "loop":
             result = ag.build_result(inputs, step_one, loops, None, model=provider.model)
             print("\n" + ag.format_report(result))
@@ -1137,6 +1211,8 @@ def cmd_agentic_run(args: argparse.Namespace) -> int:
         done = 0
         pairs = ag.run_answers(inputs, loops, counting, workers=args.workers, progress=progress)
         timings["answers_s"] = round(time.time() - started, 1)
+        if stop_on_errors(pairs):
+            return 1
         result = ag.build_result(inputs, step_one, loops, pairs, model=provider.model)
     except (ValueError, KeyError) as exc:
         print(f"agentic-run: stopped, nothing saved: {exc}", file=sys.stderr)
@@ -1152,7 +1228,10 @@ def cmd_agentic_run(args: argparse.Namespace) -> int:
         )
         if source == "live"
     ]
-    answered = [r for r in live_rows if r.refusal_reason != "provider_error"]
+    # A live row with no passages shown makes no call; every other live row makes one, and
+    # `generate` makes one more on a cut or empty reply.
+    calling = [r for r in live_rows if r.refusal_reason != "no_context"]
+    errors = ag.count_provider_errors(loops, pairs)
     config = {
         **ag.run_config(provider.model),
         "git_commit": commit,
@@ -1166,9 +1245,24 @@ def cmd_agentic_run(args: argparse.Namespace) -> int:
         "judge_calls": len(steps),
         "judge_calls_from_cache": sum(1 for s in steps if s.cached),
         "answer_generations": len(live_rows),
-        # Calls beyond one per answered live row are `generate`'s single live retry.
-        "answer_retries": counting.calls - sum(1 for s in steps if not s.error) - len(answered),
+        # Attempts (successful or failed) beyond one per live answer row: `generate`'s single
+        # live retry, whether or not the retry itself succeeded.
+        "answer_retries": counting.attempts - len(steps) - len(calling),
         "llm_cache": str(args.llm_cache),
+        "replay": bool(args.replay),
+        "bundle": str(args.bundle) if args.replay else None,
+        "provider_errors": errors,
+        "accept_provider_errors": bool(args.accept_provider_errors),
+        "inputs_sha256": {
+            "questions": _sha256_file(args.questions),
+            "results": _sha256_file(args.results),
+            "answers": _sha256_file(args.answers),
+        },
+        "args": {
+            k: (str(v) if isinstance(v, Path) else v)
+            for k, v in sorted(vars(args).items())
+            if k != "func"
+        },
     }
     payload = {
         "config": config,
@@ -1502,6 +1596,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="run from an uncommitted tree; recorded in the result as git_dirty",
     )
+    agentic.add_argument(
+        "--accept-provider-errors",
+        action="store_true",
+        help="finalise even if some calls failed (a failed judge call fails open, a failed "
+        "answer fails gate 2); without it the run exits non-zero, writes nothing and can be "
+        "rerun to retry only the failed calls",
+    )
+    agentic.add_argument(
+        "--replay",
+        action="store_true",
+        help="make no model call: answer every request from --bundle (no Ollama, no clean tree "
+        "needed); a request the bundle lacks stops the run",
+    )
+    agentic.add_argument("--bundle", type=Path, default=AGENTIC_BUNDLE)
     agentic.set_defaults(func=cmd_agentic_run)
 
     cache = subparsers.add_parser("cache", help="bundle or restore the replay caches")

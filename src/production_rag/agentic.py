@@ -43,7 +43,6 @@ from typing import Any
 
 from .answers import AnswerRow, score_answer, summarise
 from .chunking import Chunk
-from .fuse import reciprocal_rank_fusion
 from .generate import REFUSAL_TEXT, Passage, build_passages, generate
 from .groundtruth import Question, gold_chunk_ids, load_questions
 from .injection import load_clean_subset
@@ -77,6 +76,13 @@ GAIN_BAR = 0.02
 GUARDRAIL_POINTS = 5
 INVALID_RATE_BAR = Fraction(5, 100)
 PROMPT_TOKEN_LIMIT = NUM_CTX
+
+#: Printed with every token count. Ollama can reuse a prompt prefix it has already evaluated and
+#: then report only the new tokens, so a server-reported prompt token count can undercount.
+TOKEN_NOTE = (
+    "prompt token counts are as reported by the server; a reused prompt prefix can make them "
+    "undercount, so prompt characters are recorded beside them"
+)
 
 #: Metrics reported in every table; the first three are the registered ones.
 PRIMARY = "ndcg@10"
@@ -225,15 +231,27 @@ Retrieve = Callable[[str], tuple[Ranking, float]]
 def merge_rankings(lists: Sequence[Sequence[tuple[str, float]]]) -> Ranking:
     """The merged ranking over the pool-50 lists of every query issued so far.
 
-    Equal-weight reciprocal rank fusion with k = 60, the project's own `fuse` function. One list
-    is returned as it is (it is already the baseline pool, and re-scoring it would change nothing
-    but the scores). Equal weights are the registered design: with 2:1 a new rank-1 chunk
-    (1/61) scores below the original's rank 50 (2/110) and a re-query could never change the
-    top 10.
+    Equal-weight reciprocal rank fusion with k = 60. One list is returned as it is (it is already
+    the baseline pool, and re-scoring it would change nothing but the scores). Equal weights are
+    the registered design: with 2:1 a new rank-1 chunk (1/61) scores below the original's rank 50
+    (2/110) and a re-query could never change the top 10.
+
+    Ties are broken as registered, "original first": by the earliest issued list that contains the
+    chunk, then by its rank in that list, and only then by chunk id. `fuse.reciprocal_rank_fusion`
+    breaks them by chunk id alone, which would let string order decide almost every tied pair of an
+    iterated question, so the loop does not use it. Scores are summed exactly (fractions), so two
+    chunks with the same rank pattern tie exactly however the lists are ordered.
     """
     if len(lists) == 1:
         return list(lists[0])
-    return reciprocal_rank_fusion(lists, k=RRF_K)
+    totals: dict[str, Fraction] = {}
+    first_seen: dict[str, tuple[int, int]] = {}
+    for index, ranking in enumerate(lists):
+        for rank, (chunk_id, _) in enumerate(ranking, start=1):
+            totals[chunk_id] = totals.get(chunk_id, Fraction(0)) + Fraction(1, RRF_K + rank)
+            first_seen.setdefault(chunk_id, (index, rank))
+    ordered = sorted(totals, key=lambda cid: (-totals[cid], first_seen[cid], cid))
+    return [(cid, float(totals[cid])) for cid in ordered]
 
 
 @dataclass
@@ -462,7 +480,10 @@ def load_inputs(
     payload = json.loads(Path(results_path).read_text(encoding="utf-8"))
     config = payload["config"]
     if (config.get("k"), config.get("pool")) != (K, POOL):
-        raise ValueError(f"{results_path}: table was run at k={config.get('k')}, pool=pool")
+        raise ValueError(
+            f"{results_path}: table was run at k={config.get('k')}, pool={config.get('pool')}; "
+            f"the protocol fixes k={K}, pool={POOL}"
+        )
     rows = [r for r in payload["rows"] if r["arm"] == ARM and r["strategy"] == STRATEGY]
     if not rows:
         raise ValueError(f"no rows for arm={ARM!r} strategy={STRATEGY!r} in {results_path}")
@@ -553,10 +574,18 @@ def prepare_step_one(specs: Sequence[QuestionSpec], retrieve: Retrieve) -> StepO
 # running the loops
 # ---------------------------------------------------------------------------
 def _map(fn, items, workers: int) -> list:
+    """Map `fn` over `items`, `workers` at a time. An interrupt (or any error) cancels the work
+    not yet started and is re-raised, instead of waiting for the whole queue to drain."""
     if workers <= 1:
         return [fn(item) for item in items]
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        return list(pool.map(fn, items))
+    pool = ThreadPoolExecutor(max_workers=workers)
+    try:
+        results = list(pool.map(fn, items))
+    except BaseException:
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    pool.shutdown()
+    return results
 
 
 def run_loops(
@@ -698,12 +727,14 @@ def planned_generations(inputs: Inputs, loops: dict[str, LoopResult]) -> int:
 
 
 class CountingProvider:
-    """Counts the calls a stack makes and how many came from its cache. Changes nothing else."""
+    """Counts the calls a stack makes (`attempts` includes the ones that failed), and how many
+    came from its cache. Changes nothing else."""
 
     def __init__(self, inner: LLMProvider) -> None:
         self.inner = inner
         self.calls = 0
         self.cached = 0
+        self.attempts = 0
         self._lock = threading.Lock()
 
     @property
@@ -719,6 +750,8 @@ class CountingProvider:
         return bool(getattr(self.inner, "offline", False))
 
     def complete(self, prompt: str, **kwargs: Any) -> LLMResponse:
+        with self._lock:
+            self.attempts += 1
         response = self.inner.complete(prompt, **kwargs)
         with self._lock:
             self.calls += 1
@@ -821,6 +854,41 @@ def _category_key(category: str) -> tuple[int, str]:
     return (CATEGORY_ORDER.index(category) if category in CATEGORY_ORDER else 99, category)
 
 
+def baseline_metrics_difference(specs: Sequence[QuestionSpec]) -> float:
+    """Largest gap between the baseline metrics recomputed from the stored top 10 and gold and the
+    per-question metrics stored in the retrieval table. Anything above rounding means the labels
+    in use are not the table's, so the run stops before any call."""
+    return max(
+        (
+            abs(
+                RetrievalScore.evaluate(list(s.baseline), s.gold).as_dict()[m] - s.stored_metrics[m]
+            )
+            for s in specs
+            if s.scored
+            for m in METRICS
+        ),
+        default=0.0,
+    )
+
+
+def count_provider_errors(
+    loops: dict[str, LoopResult], pairs: Sequence[AnswerPair] | None = None
+) -> dict[str, int]:
+    """Failed calls so far: judge steps that returned nothing, and answer rows that are a
+    `provider_error`. (On a replay these are cache misses.)"""
+    return {
+        "judge": sum(
+            1 for loop in loops.values() for s in loop.steps if s.invalid == "provider_error"
+        ),
+        "answers": sum(
+            1
+            for p in pairs or []
+            for row in (p.baseline, p.agentic)
+            if row.refusal_reason == "provider_error"
+        ),
+    }
+
+
 def steps_report(specs: Sequence[QuestionSpec], loops: dict[str, LoopResult]) -> dict[str, Any]:
     """How many judge calls, how loops ended, and how often the loop refused."""
 
@@ -913,6 +981,12 @@ def cost_report(
             "mean": _mean([r.completion_tokens for r in results]),
             "total": sum(r.completion_tokens for r in results),
         },
+        "prompt_chars": {
+            "mean": _mean([sum(s.prompt_chars for s in r.steps) for r in results]),
+            "total": sum(s.prompt_chars for r in results for s in r.steps),
+            "max_prompt": max((s.prompt_chars for r in results for s in r.steps), default=0),
+        },
+        "note": TOKEN_NOTE,
         "loop_latency_s": stats([r.latency_s for r in results]),
         "baseline_retrieval_latency_s": stats([baseline_latency[s.qid] for s in members]),
         "baseline_llm_calls": 0,
@@ -1245,6 +1319,15 @@ def format_report(result: dict[str, Any]) -> str:
             f"{block['ndcg@10']['agentic']:.3f} | {block['recall@5']['baseline']:.3f} | "
             f"{block['recall@5']['agentic']:.3f} |"
         )
+    cost = result["cost"]["scored"]
+    lines += [
+        "",
+        f"cost per question (scored): {cost['judge_calls']['mean']:.2f} judge calls, "
+        f"{cost['prompt_tokens']['mean']:.0f} prompt tokens "
+        f"({cost['prompt_chars']['mean']:.0f} characters), "
+        f"{cost['completion_tokens']['mean']:.0f} completion tokens",
+        f"note: {cost['note']}",
+    ]
     s = result["steps"]["all"]
     lines += [
         "",
