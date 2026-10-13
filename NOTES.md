@@ -1957,3 +1957,96 @@ is exported as `production_rag.recorded_latency_s` and the two are labelled sepa
 **Prices.** Every model this project has run is free: local Ollama models, and OpenRouter `:free` ids. Their
 price is 0 and the price table says so. A model that is not in the table has its cost omitted and flagged,
 not set to 0.
+
+
+## Tracing: what was built, and the outcome split (2026-10-13)
+
+This section records the build. It adds to the registered budget above and changes nothing in it.
+
+**P-13 is not complete.** Its outcome is split in two, and only the first part has been worked on:
+
+| Part | Status |
+|---|---|
+| **P-13 local instrumentation and overhead evaluation** | Instrumentation built and tested. The overhead *harness* is built and was smoke-run; the **registered overhead measurement has not been run** (it needs the local Langfuse stack and a quiet machine). No overhead figure exists yet. |
+| **Live Cloud Run tracing** | **Deferred.** The live service is unchanged and untraced. Where its traces would go, and what that costs, is the owner's decision; options, estimated costs and privacy are written up in `space/DEPLOY.md`. |
+
+**What exists.**
+- `src/production_rag/tracing.py`: spans over OpenTelemetry, no-op unless an OTLP endpoint is configured
+  (or `PRODUCTION_RAG_TRACING=1`) and the `tracing` extra is installed. The disabled path costs about 1 microsecond
+  per `with` block (measured with `timeit`, 200,000 calls) and imports nothing; a test runs a retrieval and a
+  generation in a clean interpreter and asserts no `opentelemetry` module was loaded.
+- Spans: `rag.query` with `rewrite`, `retrieve.bm25`, `retrieve.dense` (the query embedding is inside it), `fuse`
+  (absent on single-ranking arms, where nothing is fused), `rerank` and `generate`. A caller that also generates
+  opens `tracing.query` itself, so generation is a child of the same root; an inner `retrieve` joins it.
+- `src/production_rag/pricing.py`: USD per million tokens. Every model the project has run is free (local Ollama,
+  OpenRouter `:free`), so those are 0. The one non-zero entry, `google/gemini-2.5-flash-lite` at $0.10/$0.40, is the
+  price already written next to a never-run arm in `providers.MODEL_ARMS`. A model not in the table has its cost
+  **omitted** and `production_rag.cost_known=false`, never 0.
+- `trace-bench`, `trace-replay` (`src/production_rag/tracebench.py`, registered from `cli.py`).
+- `tracing.compose.yml` and `tracing.env.example`: a local Langfuse for verification, not run.
+
+**Langfuse attribute names, verified** against <https://langfuse.com/integrations/native/opentelemetry> (fetched
+2026-10-13): `langfuse.observation.type` (`generation`), `langfuse.observation.usage_details` (JSON string),
+`langfuse.observation.cost_details` (JSON string), `langfuse.observation.model.name`,
+`langfuse.observation.input` / `.output`, `langfuse.observation.level`, `langfuse.trace.input`. That page
+says the key schema inside `usage_details` / `cost_details` is not specified there, so `input`, `output` and `total`
+(Langfuse's usual keys) are used, and that is **not** verified against an ingesting server. Endpoint
+`/api/public/otel` needs v3.22 or later on a self-hosted server, with Basic auth of `public:secret`. Phoenix's
+OTLP endpoint was not looked up in this session; `/v1/traces` on port 6006 is from memory and is marked as such.
+GenAI attributes follow the OpenTelemetry GenAI conventions: `gen_ai.system`, `gen_ai.request.model`,
+`gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`.
+
+**Decisions and why.**
+- *OpenTelemetry, not a vendor SDK.* One OTLP exporter reaches both back ends and the application imports no vendor code.
+- *The module keeps its own TracerProvider and installs no global one.* It cannot hijack another library's telemetry.
+- *Tracing may not change a request.* Every OpenTelemetry call is guarded: an exception is swallowed and logged once per
+  call site, the pipeline's own exceptions pass through a span untouched, and a test breaks `start_span`, `set_attributes`,
+  `add_event`, `set_status` and `end` in turn and checks that retrieval and generation return the same result.
+  Export is `BatchSpanProcessor` on a worker thread with a 5-second bound (the SDK defaults are 10 s and 30 s), so an
+  unreachable collector costs dropped spans. A test points it at a closed local port, serves 20 full requests and
+  checks they finish in under 3 s and that shutdown returns.
+- *Errors.* A failing stage gets status ERROR and an `exception` event with the exception type. The message is recorded
+  only for operational types (provider errors, timeouts, cache misses, OS errors) or with content capture on, and no stack
+  trace is ever recorded, because a message or a frame can hold the question. The exception is re-raised unchanged.
+  Failures the code already classifies are attributes on the LLM span: `production_rag.failure_kind` is `truncated`,
+  `unparseable`, `empty_payload`, `empty_reply` or `fallback`, with `langfuse.observation.level=WARNING`.
+- *Content capture is off by default* (`PRODUCTION_RAG_TRACE_CONTENT=1` to enable): a test serialises every attribute and
+  event of a full trace and asserts the question, the model's reply and a retrieved passage appear nowhere.
+- *The live image was not changed.* `space/Dockerfile` does not install the extra: adding a dependency to an image that
+  cannot be built here (no Docker) would be an untested change to a deployed artefact. The one-line change is in `DEPLOY.md`.
+
+**Smoke runs, to show the commands work. They are not measurements.** Another process was using the CPU, the sample
+sizes are tiny and nothing here is committed.
+- `trace-bench --limit 20 --repeats 2`, no OTLP endpoint: off p50 86.0 ms, in-memory p50 83.8 ms (added -2.2 ms, which is
+  noise; p95 differed by 22 ms). 240 of 240 expected spans exported. The `otlp` condition was skipped and the result
+  says the verdict is not evaluated.
+- `trace-replay -n 5`: 11 spans per question; the five questions took 0.28 to 0.44 s of wall time, dominated by the three
+  dense retrievals (the real query encoder, 0.21 to 0.35 s); rewrite, rerank and generate were 17 to 30 ms each as cache
+  reads. 11,815 input and 516 output tokens in total, cost $0.00 (all priced as free).
+- Worth knowing from that run: the cached rewrite for the first question was answered by the **Ollama fallback**, not
+  OpenRouter, and the span says so (`fallback_used`, `failure_kind=fallback`, `model_substituted`). The cache audit knew this
+  already; the trace now shows it per call.
+
+**Replay limits, found by running it.**
+- `trace-replay` generates from the answer table's **recorded top-10** (`--context frozen`, the default), not from the
+  reranked context, because no committed answer entry exists for the reranked context. Rewrite and rerank do run on their
+  own recorded entries. `--context pipeline` generates from the context the run actually retrieved; on the first question
+  it was a cache miss and the command stops with "replay miss", which is the intended behaviour. The result file states
+  which context was used.
+- Rerank is replayed from `eval/cache/rerank.jsonl` through the existing `CachedReranker`, so it needs no torch or weights.
+  The dense query embedding still needs the real encoder (`--extra embed`).
+
+**Not verified, and why.**
+- `tracing.compose.yml` was parsed as YAML and checked as text (pinned images, loopback ports, no default secrets) and
+  was **not started**; the instruction for this work was not to start Docker. The ClickHouse tag (25.12.11) is the one
+  upstream's current compose uses; upstream's v3.225 compose left ClickHouse unpinned, so that combination is untested.
+- Image tags checked against the registries on 2026-10-13: `langfuse/langfuse` and `langfuse/langfuse-worker` 3.225.11
+  (3.225.12 exists on GitHub but not as a Docker Hub tag), `clickhouse/clickhouse-server` 25.12.11, `redis` 7.4.11,
+  `postgres` 17.11, MinIO `cgr.dev/chainguard/minio@sha256:dc455cdd...` (digest, since only `latest` is published free),
+  Phoenix `arizephoenix/phoenix:version-20.21.2`. Upstream's current mainline is Langfuse v4 (4.58.0); v3 was kept because
+  that is what was asked for, and the choice is the owner's.
+- Nothing has been ingested by a real Langfuse, so how it renders these spans (generation view, cost column) is unconfirmed.
+
+**Registered measurement, when it runs** (from the repository root, with the stack up and the quiet-machine gate passed):
+`trace-bench --otlp-endpoint http://127.0.0.1:3000/api/public/otel`, with `OTEL_EXPORTER_OTLP_HEADERS` holding the
+Basic credential. One run, the result committed unedited.
