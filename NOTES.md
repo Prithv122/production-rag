@@ -1790,3 +1790,56 @@ end, beside the target and renamed into place. Four workers by default.
 replay record, and exporting it to a bundle is a step for after the run. The README, interview notes
 and resume bullet wait for the result. A fresh-context review of this harness is still due before any
 live call, as the protocol requires.
+
+## Agentic retrieval arm: fresh review, decisions and changes (2026-10-13)
+
+A review from a clean context read the harness above before any live call and cleared it with the
+fixes below. The owner delegated the decisions. None changes the registered protocol; items 1 and 2
+turn a silent build-time default into the registered or a safer behaviour. No model has run.
+
+1. **Merge ties now go to the original list first, as registered.** The first version fused with
+   `fuse.reciprocal_rank_fusion`, whose ties fall back to chunk id as a string. Two chunks with equal
+   scores are common once a question iterates (any pair at the same rank in two lists), so string
+   order (`dagster` before `dbt` before `duckdb`, `#10` before `#2`) was deciding them, and "original
+   first" meant nothing. The loop's merge now sorts by descending score, then the earliest issued list
+   that contains the chunk, then its rank in that list, then chunk id. Scores are summed as exact
+   fractions so equal rank patterns tie exactly. With disjoint lists the top 10 alternates original
+   rank 1, new rank 1, original rank 2, and so on. `fuse.py` and every other arm are untouched.
+2. **A failed call no longer ends in a finished-looking result.** If any judge step or live answer
+   row is a `provider_error`, the command prints `provider errors: N`, exits non-zero, writes no result
+   file, and says to rerun the same command: a failed call is not cached, so the rerun retries only
+   those calls. The check runs after the loop phase (so a dead model does not burn the answer phase)
+   and again after the answer phase. `--accept-provider-errors` finalises anyway under the rules
+   recorded above (a failed judge call fails open and counts in gate 3; a failed answer fails gate 2
+   and leaves no verdict); the result records the flag and the counts. A replay miss is the same
+   event and is reported as `replay misses`.
+3. **The live provider is pinned by a test**: a cache wrapping the Ollama client directly (no fallback
+   chain), 8,192-token window, the registered model, the cache at `--llm-cache`.
+4. **An interrupt cancels queued work.** The worker pool is shut down with `cancel_futures` on any
+   exception or Ctrl-C and the exception is re-raised, instead of draining the queue.
+5. **Digest guard.** The first live run writes the Ollama model digest to `model_digest.txt` in the
+   cache directory (a `.txt`, so a cache export never reads it as an entry); a resume under a
+   different digest is refused. A model that reports no digest cannot be pinned and stops the run.
+6. **Prompt characters beside prompt tokens**, in the cost summary (mean, total, longest prompt), with
+   a note in the result and the report: Ollama can reuse an evaluated prompt prefix and report only
+   the new tokens, so a server-reported prompt token count can undercount.
+7. **`baseline_matches_stored` is enforced before any call**, dry run included. The baseline metrics
+   recomputed from the stored rankings and labels must equal the table's per-question metrics (to
+   1e-9) or the command stops.
+8. **The result records its inputs**: sha256 of the questions file, the retrieval table and the answer
+   table, and every argument value (paths, workers, model, phase, flags).
+9. **Fixes to wording and counts.** The input error message printed the literal `pool=pool`; it now
+   names the table's k and pool and the registered ones. `answer_retries` counted a row whose retry
+   failed as a retry only by accident of arithmetic; the provider wrapper now counts attempts
+   (including failed ones) and the field is attempts beyond one per live answer row, which is what a
+   retry is.
+10. **Replay.** `cache export` now includes the run's cache: `.cache/agentic-llm` to
+    `eval/cache/agentic_llm.jsonl` (and `cache import` expands it back). `agentic-run --replay
+    [--bundle PATH]` answers every request from that bundle through an offline provider over a throwaway
+    cache: no Ollama, no model, a dirty tree allowed, a different `--out` required, and any request the
+    bundle lacks stops the run. A test runs the fake run, exports its cache, replays it and gets the
+    same verdict, retrieval table and guardrail.
+
+Also changed: the fast tests grew by the cases above, and a second round of hand-made faults (tie key,
+shutdown mode, error stop, digest check, baseline check, fallback switch, attempt count) each fail a
+test.
