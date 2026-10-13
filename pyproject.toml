@@ -29,6 +29,10 @@ ann = [
 pgvector = [
     "psycopg[binary]>=3.2",
 ]
+tracing = [
+    "opentelemetry-exporter-otlp-proto-http>=1.45.1",
+    "opentelemetry-sdk>=1.45.1",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -40,6 +44,7 @@ packages = ["src/production_rag"]
 
 [dependency-groups]
 dev = [
+    "opentelemetry-sdk>=1.45.1",
     "pytest>=8.3",
     "pytest-cov>=6.0",
     "ruff>=0.9",
