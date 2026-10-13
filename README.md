@@ -902,13 +902,13 @@ questions.
 **2. The gain sits where §5 says rewriting helps.** Conceptual questions moved from 0.590 to 0.604
 nDCG@10 and 0.632 to 0.657 recall@5; exact-terminology questions did not move (0.867 vs 0.865). The
 four hand-written cross-tool questions, the case a second hop was supposed to fix, all iterated and
-all stayed at **0.000**. A 7B judge's follow-up query did not find the second tool's passage any more
-than the rewrite arm did.
+all stayed at **0.000**. The judge's follow-up queries did no better than `expand` here, and worse
+than `replace`, the one arm that ever scored on them (0.125).
 
 **3. The judge's "insufficient" is informative, its "sufficient" is not strict enough.** On step 1,
 27 of the 36 questions it called insufficient really had no gold chunk in the top 5; 24 of the 141 it
 called sufficient also had none. So a re-query is aimed at the right questions most of the time, but
-the loop never gets a chance on a sixth of the misses.
+24 of the 51 step-1 misses were waved through as sufficient and never searched again.
 
 **4. The real cost is refusals, not latency.** The loop refused 23 of 178 answerable questions,
 and 5 of those already had a gold chunk in the top 5. On the 60-question answer subset that turned 5
@@ -948,8 +948,8 @@ Langfuse v3 stack in local Docker (`tracing.compose.yml`):
 | on, in-memory exporter | 32.48 ms | 67.36 ms | 1.04 ms | 2.75 ms |
 | **on, OTLP to Langfuse** | 32.34 ms | 67.13 ms | **0.90 ms** | 2.53 ms |
 
-**Verdict: pass** (0.90 ms against a 1.57 ms limit). All 4,416 spans of the OTLP condition were
-accepted by Langfuse, none failed, and the batch exporter's background thread used 0.31 ms of CPU
+**Verdict: pass** (0.90 ms against a 1.57 ms limit). The OTLP exporter reported all 4,416 spans of its
+condition (warm-up pass included) exported and none failed, and the batch exporter's background thread used 0.31 ms of CPU
 per query. Under interleaving that thread can run during the untraced samples too, so its cost is
 reported beside the latency rather than folded into it. The quiet-machine gate (30 one-second CPU
 samples, mean under 15%, max under 40%, no model runner) failed the first attempt at a 15.2% mean,
@@ -984,9 +984,12 @@ detected", not "equivalent". The hybrid pair's non-deciding nDCG@10 (−0.023) a
 this project's hybrid. **A follow-up decomposition (exploratory, same 177 questions) traced about two
 thirds of that ranking gap to LlamaIndex merging candidates by a hash of text plus metadata instead of
 by chunk id**, which collapses chunks with duplicate text and pushed a gold chunk down on 7 questions
-(merge-key effect on nDCG@10 −0.015, −0.028 to −0.003). The BM25 tokeniser, the leading suspect, was
-not distinguishable from zero (−0.008, −0.027 to +0.012), the RRF rank offset contributed nothing, and
-recall@10 was unaffected.
+(merge-key effect on nDCG@10 −0.015, −0.028 to −0.003). The BM25 tokeniser, the suspect named before the
+decomposition, was not distinguishable from zero (−0.008, −0.027 to +0.012), the RRF rank offset contributed nothing, and
+recall@10 was unaffected. The decomposition's pre-registered reproduction gate failed first (172 and
+161 of 184 lists matched the comparison's stored ones, differing only where scores tie exactly, from
+a different machine); it was replaced, before any decomposition number existed, by a same-machine
+gate against the real arms, which passed 184 of 184.
 
 ## 6. How to run
 

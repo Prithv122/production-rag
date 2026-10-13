@@ -357,7 +357,7 @@ and point the exporter at a closed port to check the answer comes back unchanged
 
 For cost, I registered a budget before measuring: at most 1 ms or 5% of the untraced p50, whichever
 is larger. Exporting to a self-hosted Langfuse in Docker added 0.9 ms at p50 to a 31 ms query, under
-the 1.57 ms limit, and Langfuse accepted all 4,416 spans. I also report the exporter thread's CPU
+the 1.57 ms limit, and all 4,416 spans were exported with none failing. I also report the exporter thread's CPU
 separately, because with the conditions interleaved it can land in the untraced samples.
 
 The part I'd point to is what the first trace showed: every replayed rewrite was flagged as a

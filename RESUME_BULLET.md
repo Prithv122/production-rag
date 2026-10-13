@@ -107,8 +107,9 @@ Form: **action → technical specifics → measured outcome.** Numbers or it doe
   per-call cost, failure kinds, Langfuse generation attributes), off by default, content capture off,
   and isolated so a failing exporter cannot alter a request; measured it against a budget registered
   first: OTLP export to self-hosted **Langfuse v3** added **0.90 ms p50** to a 31.4 ms query (limit
-  1.57 ms), with **4,416/4,416** spans accepted. Traces flagged every replayed rewrite as a silent
-  provider fallback, the misattribution an earlier cache audit had found by hand.
+  1.57 ms), with **4,416/4,416** spans exported and none failed. Traces flagged every replayed rewrite as a silent
+  provider fallback, the misattribution an earlier cache audit had found by hand. Local measurement;
+  the live deployment is not traced yet (backend hosting decision pending).
 
 ## Which roles this supports
 
