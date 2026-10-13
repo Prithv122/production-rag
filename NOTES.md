@@ -1691,3 +1691,102 @@ guardrail above is computed from these paired rows.
 **Run discipline.** One run. The result file is written by the run command and committed unedited; the
 write-up quotes it. An uninteresting result is not a reason for a second run. The harness is built and
 tested on a fake provider first, and gets a fresh-context review before any live call.
+
+## Agentic retrieval arm: harness built, not yet run (2026-10-13)
+
+`src/production_rag/agentic.py`, the `agentic-run` command and `tests/test_agentic.py` plus
+`tests/test_agentic_run.py` implement the protocol registered in 4523723 and change none of it. The
+judge prompt is the registered text: a test reads it out of the frozen section above and compares it
+byte for byte, so editing either one breaks the build. No model has seen a judge prompt, and no
+agentic number exists. Built and tested on a fake provider. Fast suite: 728 passed, 15 skipped, 24
+deselected as slow; ruff clean.
+
+**Where the protocol was silent, and what was chosen.** All of these were fixed before any prompt
+reached a model, and none is a tuning knob.
+- *Which questions run.* The loop runs on all 184 questions of the retrieval table. Retrieval
+  metrics are taken on the 177 that have a gold chunk, which is exactly the set the §5 `heading`
+  table scores (`n_scored` 177: 121 conceptual, 52 exact_term, 4 cross_tool). The other 7 (the six
+  unanswerable questions, and q0064, whose evidence falls in the gap between two chunks) are all in
+  the 60-question answer subset, so the loop runs on them for the answer phase and the loop-refusal
+  count, and they are left out of nDCG, recall and MRR, as in §5. "The answerable questions" in the
+  primary outcome is read as these 177. Labels are the `gold` lists stored in `retrieval.json`, not
+  recomputed, and the baseline metrics are recomputed from the stored top 10 with the project's own
+  functions and checked against the stored per-question metrics.
+- *Judge prompt whitespace.* The user prompt has no trailing newline; the system prompt is the single
+  line the frozen text wraps. `{question}` and `{passages}` are filled in one pass, so braces in a
+  question or a passage are never read as fields. A passage cut at 1,200 characters carries the
+  "[... passage truncated ...]" line, because `Passage.render` is the registered renderer and that
+  line is part of it.
+- *Reading a reply.* Parsed with the project's `extract_json`, so a fenced or prefixed object counts
+  as an object everywhere. Invalid is: no JSON object (including a list or a bare string), `sufficient`
+  absent or not a JSON boolean, or `sufficient` false with a `next_query` that is missing, not a
+  string, blank, or over 300 characters (measured after stripping; the stripped query is the one
+  issued, with its case kept). A `next_query` on a sufficient reply is ignored.
+- *A failed call.* A judge call that returns nothing is an invalid reply (kind `provider_error`):
+  fail open, no refusal, counted against gate 3. One attempt per step, no live retry. Errors are not
+  cached, so a resumed run attempts them again.
+- *Repeats.* The question itself counts as an already-issued query. At the third step an insufficient
+  reply refuses without retrieving its `next_query`.
+- *Merging.* One list is returned as it is. Two or more are fused with `fuse.reciprocal_rank_fusion`
+  (equal weights, k 60, ties by chunk id), over the whole pool-50 lists, and the top 10 of the result
+  is the final ranking. The final ranking is scored on retrieval whether or not the loop refused.
+- *Step one.* Each question is retrieved once, sequentially and single-threaded, after one unrecorded
+  warm-up call. That ranking is gate 1's input, the loop's step 1, and the baseline retrieval
+  latency, so the three cannot disagree. Re-queries run under a lock, and their time is measured
+  inside it. Loop latency per question is step-1 retrieval plus each re-query plus each judge call's
+  latency as recorded with its response (the original latency, for a cached response).
+- *Statistics.* Paired bootstrap of the mean per-question difference, questions resampled with
+  replacement, the stdlib seeded generator, interval at sorted positions `int(0.025 x 20000)` and
+  `int(0.975 x 20000)` (the convention `evaluate.bootstrap_band` uses). The three registered metrics
+  share each resample. p95 is `sorted[int(0.95 x (n - 1))]`, as the retrieval table reports it. The
+  cost line is taken over the 177 scored questions (the same numbers over all 184 are in the file).
+- *Ties.* A tie is an identical ordered top 10 and no loop refusal; a refusal wins over an unchanged
+  ranking. A loop that iterated and ended on the same top 10 is still a tie.
+- *Answers.* Both arms use `generate.generate` and `answers.score_answer` unedited, so each live
+  answer keeps `generate`'s single live retry (a cut or empty reply), identical on both sides; the
+  command records how many retries happened. (The injection harness turned retries off; here the
+  protocol says the answer code is unedited, and a retry applies to both arms alike.) The tie rows are
+  the published `ollama-qwen-coder` rows. A loop refusal is a row with reason `loop`, no model and no
+  tokens.
+- *Cache.* The command's cache is `.cache/agentic-llm`, not `.cache/llm`, and it refuses `.cache/llm`.
+  The live baseline answers use the published answer prompt, whose cache key is the published entry's,
+  so a cache that holds the published entries would return them as if they were generated under the
+  8,192 window. A cache directory of its own starts empty.
+- *Guardrail.* The allowed false-refusal rise is `5 x n // 100` for `n` answerable subset questions
+  (2 for 54); refusal recall is compared as counts. Both come from the paired rows, with a model or
+  parse refusal counting as a refusal, as in the published table.
+- *Gates.* Gate 2 fails on any row answered by another model and on any answer row that is a
+  `provider_error` (no model answered it); a failed judge call is a gate-3 matter only. Gate 3 is
+  invalid replies over all judge calls, including failed calls. Gate 4 is the largest server-reported
+  prompt token count over judge calls and answer rows, strictly below 8,192; the longest prompt in
+  characters is recorded beside it. A result with a row missing also has no verdict (`complete`).
+- *Judge calibration.* Read from each question's first judge call only. A first reply that is invalid
+  is counted in its own row, not folded into either side.
+
+**Command.** `production-rag agentic-run` has no model flag and no replay flag. It stops before any
+model call if: the result file exists; the tree is dirty without `--allow-dirty` (recorded as
+`git_dirty`); the cache is `.cache/llm`; an input does not load or cross-check (stored table at k 10
+and pool 50, the 54 + 6 subset, 184 rankings, every id in the index); the local model is not listed;
+the indexes are missing; or gate 1 fails on any question. `--dry-run` loads the same inputs, loads the
+encoder, checks gate 1 and prints the call budget without a model call or a clean tree. `--phase loop`
+runs the judge loops only and writes nothing. Every language-model reply goes through the cache, so
+an interrupted run resumes by running the same command again; the result file is written once, at the
+end, beside the target and renamed into place. Four workers by default.
+
+**Checks made at build time.**
+- *Gate 1 on the real data, offline.* With the real encoder, all 184 step-1 rankings equal the stored
+  `hybrid_score_weighted`/`heading` top 10 (184 of 184). The baseline metrics recomputed from the
+  stored rankings match the stored per-question metrics and the published `ndcg@10` of the §5 row.
+  Both are slow tests.
+- *Call budget (dry run, no model call).* 184 loop questions: 184 to 552 judge calls; the answer phase
+  generates between 0 and 120 answers (two per changed subset question, one per loop refusal, none
+  for ties), so at most 672 calls plus a live retry for each cut or empty answer.
+- *Mutation check.* Twenty-six hand-made faults (RRF k, step cap, each refusal branch, repeat
+  comparison, top-5 and 1,200-character limits, JSON mode and token limit, the 300-character limit,
+  the gain bar, both interval comparisons, each gate bar, guardrail points and both guardrail
+  comparisons, the seed, the resample count, a failed call not counting as invalid) each fail a test.
+
+**Not built, on purpose.** A replay command (the injection command has none either): the cache is the
+replay record, and exporting it to a bundle is a step for after the run. The README, interview notes
+and resume bullet wait for the result. A fresh-context review of this harness is still due before any
+live call, as the protocol requires.
