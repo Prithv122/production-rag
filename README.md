@@ -1102,6 +1102,13 @@ uv run --extra tracing --extra embed production-rag trace-replay -n 10
 uv run --extra tracing --extra embed production-rag trace-bench --otlp-endpoint http://127.0.0.1:3000/api/public/otel
 ```
 
+A cached response is exported with a cost of 0 and `production_rag.cached=true`, with the original cost kept in
+`production_rag.recorded_cost_usd`. The served path produces one full trace per request; batch commands that call the model
+from a thread pool (`answer-eval`) produce one trace per LLM call instead of a tree. `trace-bench` refuses to run unless the
+machine is quiet (mean CPU below 15% and max below 40% over 30 seconds, and no `llama-server` or Ollama runner process;
+`--skip-quiet-gate` overrides it and the override is recorded in the result), and reports a pass or fail only if every span was
+exported.
+
 `trace-replay` runs the whole pipeline on cached LLM and rerank results (a cache miss is an error) and
 writes a per-stage breakdown with tokens and cost to `eval/results/tracing_stages.json`; the durations of
 the LLM and rerank stages in it are cache reads, and the latency recorded when each call was first made is

@@ -232,6 +232,20 @@ What it gives: one trace per question, with a span for each stage (`rewrite`, `r
 The design, the span names and the attribute names are in `src/production_rag/tracing.py`; the
 overhead budget it is held to is registered in `NOTES.md`.
 
+### What a trace is
+
+The served path is the Gradio handler: each request runs its retrieval and generation in one thread and
+produces one `rag.query` trace with the full span tree. The batch commands behave differently. `eval` runs
+its retrievals one after another and each is its own `rag.query` trace, but `answer-eval` and the other
+commands that call the model from a thread pool produce **one trace per LLM call** (a lone `generate` or
+`rewrite` span) rather than a tree, because the worker threads do not inherit a root. Count traces
+accordingly if those commands are ever run with tracing on.
+
+A response served from the replay cache keeps its recorded token counts but is exported with a cost of 0,
+flagged `production_rag.cached=true`; what the original call cost is kept in `production_rag.recorded_cost_usd`.
+Summing `cost_usd` over a period therefore gives spend, and summing `recorded_cost_usd` gives what the same
+answers would have cost uncached.
+
 ### What is and is not exported
 
 | Exported always | Exported only with `PRODUCTION_RAG_TRACE_CONTENT=1` | Never exported |
@@ -242,8 +256,9 @@ The question a visitor types is **user data**, and so is anything that quotes it
 is **off by default** and should stay off on the public demo. The retrieved passages come from public
 documentation, but they sit in the same prompt as the question. The metadata that is exported is
 low-risk but not nothing: it shows when someone used the demo and whether an answer was refused. Error
-*messages* are recorded only for operational failures (an HTTP status from a provider, a timeout, a
-cache miss); for any other exception only its type is kept, because such a message can quote input.
+*messages* are reduced to a fixed prefix (for a provider failure, `HTTP 403`, `could not reach`, `replay mode`
+and a few others): the response body and URL a provider error carries are never exported, because a body can
+echo the prompt. For any other exception only its type is kept. With content capture on, the full text is kept.
 
 Where trace data lives and for how long is decided by the backend, not by this repository:
 Langfuse Cloud keeps it for the plan's data-access window; a self-hosted Langfuse or Phoenix keeps it
@@ -297,6 +312,13 @@ The remedies are `--no-cpu-throttling` (instance-based billing, which costs more
 `OTEL_BSP_SCHEDULE_DELAY` (milliseconds) so batches leave sooner; neither has been tried on the live
 service. Treat the first week of live traces as incomplete.
 
+Shutdown adds a second limit. The exporter's own timeout is 5 seconds per attempt
+(`PRODUCTION_RAG_TRACE_EXPORT_TIMEOUT_S`; the batch processor's separate export-timeout setting is not
+read by the SDK, so it is not what bounds this). If the collector accepts connections and then drops
+them, the flush at shutdown can run for up to about 30 seconds, while Cloud Run stops an instance about
+10 seconds after SIGTERM. Spans still queued at that moment are lost. Neither number has been measured
+against the live service.
+
 ### Hosting options and what they cost
 
 Every figure is an **estimate** from the source and date beside it. Prices change; confirm on the
@@ -305,8 +327,8 @@ vendor's page before deciding. None of this is spent or committed.
 | Option | Estimated monthly cost | What it needs | Honest trade-off |
 |---|---|---|---|
 | **Langfuse Cloud, Hobby** | $0 (free, no card). 50k "units" a month, 30 days of data, 2 users. *Source: langfuse.com/pricing, 2026-10-13.* | The owner's Langfuse account and project keys. | The cheapest and quickest. A unit is any trace, span or score, so one answered question is roughly 6 units on the served arm (root, `retrieve.bm25`, `retrieve.dense`, `fuse`, `generate`, plus the trace), which is **on the order of 8,000 questions a month** before the cap. Traces go to a third party's cloud. Past the cap, ingestion stops or the next plan applies: Core is $29/month for 100k units and 90 days (same source). |
-| **Self-hosted Langfuse v3** on a small VM | About **$49/month** for a 2 vCPU / 8 GB VM (GCP `e2-standard-2`, us-central1, on demand, about $0.067/hour; third-party tracker, figures dated January 2026), **plus** disk, plus the owner's time to patch and back up it. The VM size is my estimate: Langfuse recommends at least 2 CPUs and 4 GB for its own containers alone (langfuse.com self-hosting docs, v4 page, 2026-10-13), and ClickHouse, Postgres and Redis run beside them. | A VM with Docker, a stable address and TLS in front, `tracing.compose.yml` adapted for non-loopback access. | Full control of where the data lives and how long it is kept. It is the most expensive and the most work, and it would cost more than the demo itself does. This repository's compose file is for local verification and binds to loopback; it is not a production deployment. |
-| **Arize Phoenix** on a small VM, with a persistent store | Roughly **$10 to $15/month** for a very small VM (my estimate by scaling the figure above down; not looked up), more if a managed Postgres is used. | One container, `arizephoenix/phoenix`, plus a disk or a database. | Lightest to run. **Cloud Run cannot host it usefully**: its filesystem is ephemeral, so traces would vanish on restart unless a persistent database is attached, at which point it is a VM again. Phoenix's UI is oriented to tracing and evaluation; it has no cost table of its own, so the `cost_usd` attribute shows as a plain number. |
+| **Self-hosted Langfuse v3** on a small VM | About **$49/month** for a 2 vCPU / 8 GB VM (GCP `e2-standard-2`, us-central1, on demand, about $0.067/hour; third-party price trackers, <https://calculator.holori.com/gcp/vm/e2-standard-2> and <https://gcloud-compute.com/e2-standard-2.html>, one of them dated January 2026; **not verified against Google's own price list**), **plus** disk, plus the owner's time to patch and back up it. The VM size is an estimate: Langfuse recommends at least 2 CPUs and 4 GB for its own containers alone (langfuse.com self-hosting docs, v4 page, 2026-10-13), and ClickHouse, Postgres and Redis run beside them. | A VM with Docker, a stable address and TLS in front, `tracing.compose.yml` adapted for non-loopback access. | Full control of where the data lives and how long it is kept. It is the most expensive and the most work, and it would cost more than the demo itself does. This repository's compose file is for local verification and binds to loopback; it is not a production deployment. |
+| **Arize Phoenix** on a small VM, with a persistent store | Roughly **$10 to $15/month** for a very small VM (an estimate, not a quote: the figure above scaled down for a smaller machine), more if a managed Postgres is used. | One container, `arizephoenix/phoenix`, plus a disk or a database. | Lightest to run. **Cloud Run cannot host it usefully**: its filesystem is ephemeral, so traces would vanish on restart unless a persistent database is attached, at which point it is a VM again. |
 | **Arize AX Free** (hosted) | $0: 25k spans a month, 15 days of data. *Source: arize.com/pricing, 2026-10-13.* | An Arize account. | Smaller allowance than Langfuse Hobby (about 25k spans, so roughly 5,000 questions a month at 5 spans each) and a short window. |
 
 The honest default, if the owner wants live traces at no cost, is Langfuse Cloud Hobby with content

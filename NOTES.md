@@ -1992,7 +1992,7 @@ This section records the build. It adds to the registered budget above and chang
 says the key schema inside `usage_details` / `cost_details` is not specified there, so `input`, `output` and `total`
 (Langfuse's usual keys) are used, and that is **not** verified against an ingesting server. Endpoint
 `/api/public/otel` needs v3.22 or later on a self-hosted server, with Basic auth of `public:secret`. Phoenix's
-OTLP endpoint was not looked up in this session; `/v1/traces` on port 6006 is from memory and is marked as such.
+OTLP endpoint (`/v1/traces` on port 6006) has not been checked against Phoenix's documentation or a running instance.
 GenAI attributes follow the OpenTelemetry GenAI conventions: `gen_ai.system`, `gen_ai.request.model`,
 `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`.
 
@@ -2038,15 +2038,80 @@ sizes are tiny and nothing here is committed.
 
 **Not verified, and why.**
 - `tracing.compose.yml` was parsed as YAML and checked as text (pinned images, loopback ports, no default secrets) and
-  was **not started**; the instruction for this work was not to start Docker. The ClickHouse tag (25.12.11) is the one
+  was **not started**: Docker is not used while this is being built, and bringing the stack up is a separate step. The ClickHouse tag (25.12.11) is the one
   upstream's current compose uses; upstream's v3.225 compose left ClickHouse unpinned, so that combination is untested.
 - Image tags checked against the registries on 2026-10-13: `langfuse/langfuse` and `langfuse/langfuse-worker` 3.225.11
   (3.225.12 exists on GitHub but not as a Docker Hub tag), `clickhouse/clickhouse-server` 25.12.11, `redis` 7.4.11,
   `postgres` 17.11, MinIO `cgr.dev/chainguard/minio@sha256:dc455cdd...` (digest, since only `latest` is published free),
-  Phoenix `arizephoenix/phoenix:version-20.21.2`. Upstream's current mainline is Langfuse v4 (4.58.0); v3 was kept because
-  that is what was asked for, and the choice is the owner's.
+  Phoenix `arizephoenix/phoenix:version-20.21.2`. Upstream's current mainline is Langfuse v4 (4.58.0); v3 is used because
+  the project's plan names it and v4 is untested here; moving to v4 is the owner's decision.
 - Nothing has been ingested by a real Langfuse, so how it renders these spans (generation view, cost column) is unconfirmed.
 
 **Registered measurement, when it runs** (from the repository root, with the stack up and the quiet-machine gate passed):
 `trace-bench --otlp-endpoint http://127.0.0.1:3000/api/public/otel`, with `OTEL_EXPORTER_OTLP_HEADERS` holding the
 Basic credential. One run, the result committed unedited.
+
+
+## Tracing: fresh review, decisions and changes (2026-10-13)
+
+A reviewer with no part in the build read the diff and the goal and cleared it with fixes. This section records
+each finding, what was decided, and what changed. The registered budget section above is untouched. Items 2 to 4
+refine the *measurement procedure*; they were made before the registered run, which has still not been run, and they
+only make the run stricter (a run can now be refused or marked invalid; none of them can turn a failure into a pass).
+Status is unchanged: **P-13 local instrumentation and overhead evaluation** is built and the registered measurement
+is pending; **live Cloud Run tracing** is deferred. P-13 as a whole is not complete.
+
+1. **Privacy: provider error text.** `ProviderError` messages are built from response bodies and URLs
+   (`HTTP <code> from <url>: <body>`), which can echo the prompt, and the first version exported them as
+   "operational". With content capture off, only a fixed prefix now leaves the process: `HTTP <code>`,
+   `could not reach`, `replay mode`, `openrouter error`, `unexpected response shape`, `unexpected ollama response`,
+   `non-JSON response`, `all providers failed`, `OPENROUTER_API_KEY is not set`, `no cached entry`. Any other message,
+   and every message from any other exception type (OS errors included), is dropped and only the type is kept.
+   With `PRODUCTION_RAG_TRACE_CONTENT=1` the full text is kept (300 characters). A parametrised test feeds bodies and
+   URLs that contain a marker string and asserts the marker appears nowhere in the exported spans or status.
+   This supersedes the earlier build record's "operational types" wording.
+2. **`trace-bench` verdict validity.** If the OTLP exporter reported any failed export, or exported a different number
+   of spans from the number expected (spans per query x questions x (repeats + 1)), the verdict is
+   `invalid: export failed`, neither pass nor fail: a condition that dropped spans did less work than the one the budget
+   is about. The same validity flag is written for the in-memory condition. Tested with an exporter that returns FAILURE.
+3. **Interleaving confound, and how it is reported.** The three conditions share one timeline and the batch export
+   worker runs on its own schedule, so export CPU can land inside an `off` sample. Each counting exporter now sums the
+   worker thread's CPU time (`time.thread_time()`) spent in `export`, and the result reports it per condition, total and
+   per query (`off` has none by construction). It is reported, not subtracted. On Windows thread CPU time advances in
+   coarse steps, so a small total can read 0.00; the in-memory smoke run did.
+4. **The quiet-machine gate and the CPU log are in the command.** Same gate as the pgvector quiet replication: 30
+   one-second samples of total CPU (read from the operating system: `GetSystemTimes` on Windows, `/proc/stat` on Linux,
+   the quantity the earlier run read from the `% Processor Time` counter), mean below 15% and maximum below 40%, and no
+   `llama-server` process. One addition, made here before the run: an Ollama model **runner** process also fails the
+   gate, because the runner is what executes the model on current Ollama versions and the old wording did not name it.
+   The gate runs just before the timed region (after the encoder is loaded) and fails closed: a failed gate exits with
+   code 3 and writes nothing; a gate that cannot be evaluated counts as failed. `--skip-quiet-gate` bypasses it for
+   smoke runs and is recorded in the result as `skipped`. System CPU is logged every 2 seconds during the timed region
+   and saved in the result with its mean and maximum, as a description of the conditions and not a second gate. No new
+   dependency: `psutil` was not needed. Seen while testing: the gate failed on this machine with mean 80.6% and max 90.2%
+   while another job ran, which is the behaviour wanted.
+5. **Cached responses.** A cache hit now exports `cost_usd = 0` (and zero `cost_details`) with
+   `production_rag.cached=true`, and the original call's cost is kept in `production_rag.recorded_cost_usd`; token usage
+   is exported as recorded. Summing `cost_usd` gives spend, summing `recorded_cost_usd` gives the uncached equivalent.
+   `cost_known` still says whether the model has a price. `trace-replay` reports both totals (incurred is 0 by
+   construction, since every call there is a cache hit).
+6. **`gen_ai.provider.name`** is emitted alongside `gen_ai.system` (the newer name for the same thing).
+7. **Export bound.** The batch processor's `export_timeout_millis` argument is not read by the installed SDK (its source
+   says "Not used"), so the earlier comment and code that relied on it are removed. The real bound is the OTLP exporter's own
+   timeout, 5 s per attempt by default. `space/DEPLOY.md` now says shutdown can run to about 30 s if a collector drops
+   connections, against Cloud Run's roughly 10 s after SIGTERM; neither number has been measured.
+8. **Failure-isolation tests** are parametrised per OpenTelemetry call (`start_span`, `set_attributes`, `set_attribute`,
+   `add_event`, `set_status`, `end`), each on a successful request and on a failing one, so "an exception inside tracing
+   cannot change a request" is tested literally for each call.
+9. `str(response.finish_reason)` in the reply classifier moved inside its guard; a test uses a reply object that raises
+   when inspected.
+10. **Docs.** The monthly VM figure now names its sources (two third-party price trackers, not checked against Google's
+    price list); process narration in this file and in `space/DEPLOY.md` is rewritten as plain project statements.
+11. **Batch commands.** Commands that call the model from a thread pool (`answer-eval`) produce one trace per LLM call, not
+    a `rag.query` tree, because worker threads do not inherit a root; `eval` runs retrievals one at a time and gets one tree
+    each. The served path runs a request in one thread and gets the full tree. Written in `space/DEPLOY.md` and the README.
+
+**Run instructions after the fixes** (registered measurement): bring the local Langfuse stack up and leave it idle, set
+`OTEL_EXPORTER_OTLP_HEADERS` to `Authorization=Basic <base64(public:secret)>`, then run `trace-bench` with
+`--otlp-endpoint http://127.0.0.1:3000/api/public/otel` and **without** `--skip-quiet-gate`. If the gate fails, wait and
+repeat; do not skip it.
