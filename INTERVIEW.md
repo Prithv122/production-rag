@@ -1,10 +1,10 @@
 # Interview Prep — production-rag
 
-**Nine questions, nine answers.** An unanswered question means this project is not shipped.
+**Ten questions, ten answers.** An unanswered question means this project is not shipped.
 
 If you can't answer one, you don't understand that part of your own project yet — go back and understand it. This file is the difference between a portfolio that survives a technical screen and one that collapses in it.
 
-> Answers cover retrieval and generation, both measured. Where a number is thin — n=6
+> Answers cover retrieval, generation and a prompt-injection test, all measured. Where a number is thin — n=6
 > unanswerable questions, 60 of 184 verified — the answer says so rather than rounding it up.
 
 ---
@@ -284,6 +284,39 @@ on this question set don't clear the bar", not "semantic caching doesn't work". 
 I'd try is a lexical guard: refuse a hit when the two questions differ in a code identifier or
 a negation. That would be its own pre-registered run, not a retune of this one. And without
 the rule written down first, I'd have been tempted to pick 0.97 and call 2 false hits in 40 fine.
+
+### Q10. You tested prompt-injection defences and the attack scored zero. What did that experiment tell you?
+
+_A:_ Less than I hoped, and I wrote the rule so that "less" was the only thing I was allowed to
+say. The question was whether a poisoned retrieved passage makes the answering model follow it,
+and whether a cheap defence stops that without breaking normal answers. Before any poisoned prompt
+ran, I froze the twelve attacks, the 48 question assignments, the exact wording of three defences
+and a pass rule: the baseline attack had to succeed on at least 20% of prompts before any defence
+could be compared at all.
+
+It succeeded on none. Zero of 48, on all three goals (replace the answer, leak a planted canary,
+cite an invented source). So the registered verdict is "no attack signal at this scale", and the
+four defences sitting at 0/48 are not evidence they work. A defence can't be shown to reduce an
+attack that did nothing, and the rule is what stopped me from putting that table in the README as a
+win.
+
+What I'd still claim is narrow. Zero of 48 puts the upper bound around 7% for this model and these
+attacks. It is not immunity: it's one 7B quantised model, one poison position, generic attacks and
+no adaptive attacker. It says nothing about whether an attacker could get a poisoned passage
+retrieved in the first place, because that retrieval check was registered and I never built it.
+
+There was one real number, and it was a cost. The post-hoc citation filter turned 5 of the 46 clean
+questions the baseline answered into refusals, none the other way: false refusal 8/54 to 13/54,
+about 9 points. The intervals overlap and the paired test gives p = 0.06, so I report it as observed
+on this question set, not as a measured cost of the technique. One defence also had a single
+success against a baseline of zero; I left it as a footnote, because one row in 48 is noise.
+
+What I'd do next is a separate, newly registered experiment with a stronger or less quantised
+model and attacks tailored to the question, not a rerun with the same inputs hoping for a different
+answer. What I'm proud of is the engineering around it: a harness with deterministic scoring, a
+validity gate, zero live retries by design, four independent reviews that caught real defects
+before a single generation (one attack had no gold chunk to sit next to, and a failed baseline
+could still have let a defence qualify), and mutation tests on every gate.
 
 ---
 

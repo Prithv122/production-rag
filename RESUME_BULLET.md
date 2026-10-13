@@ -87,6 +87,15 @@ Form: **action → technical specifics → measured outcome.** Numbers or it doe
   unconstrained returned a fully cited answer — two causes behind one refusal reason, which is
   why two previous fixes each cured only half. Verified live: 5 resolved citations in 15.6 s.
 
+- Pre-registered a prompt-injection experiment before running it (twelve attacks across hijack,
+  secret-exfiltration and false-citation goals on 48 questions, three defences, and a rule that no
+  defence could be compared unless the baseline attack succeeded on at least 20% of prompts), built
+  the harness with deterministic scoring, validity gates and zero live retries, and had it reviewed
+  four times from a clean context and mutation-tested before any generation. The attack scored
+  **0 of 48** on a local 7B model across 372 generations, so the registered verdict was "no attack
+  signal" and no defence was credited; the one finding reported was the citation filter's cost,
+  **8/54 to 13/54** false refusals (paired p = 0.06), not a mitigation win.
+
 ## Which roles this supports
 
 - [ ] Data Scientist / ML
