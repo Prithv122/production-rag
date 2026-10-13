@@ -72,6 +72,9 @@ services:
     environment:
       <<: *langfuse-env
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET}
+      # Next.js binds to $HOSTNAME, which Docker sets to the container id; without this the
+      # server is reachable through the published port but the loopback healthcheck is refused.
+      HOSTNAME: "0.0.0.0"
       # Headless initialisation: creates the organisation, project, API keys and first
       # user on first start, so no clicking through the UI is needed. All from tracing.env.
       LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
