@@ -324,6 +324,41 @@ def test_the_cached_flag_and_the_recorded_latency_are_exported(spans, retriever,
     assert len(inner.prompts) == 1
 
 
+def test_a_cached_response_costs_nothing_now_and_keeps_the_original_cost(
+    spans, retriever, tmp_path
+):
+    from production_rag.cache import JsonCache
+
+    model = "google/gemini-2.5-flash-lite"
+    inner = FakeProvider([response(model)], model=model)
+    provider = CachedProvider(inner, JsonCache(tmp_path))
+    ids = retriever.retrieve("incremental models", arm="bm25", k=2, pool=4).chunk_ids
+    generate("q", ids, retriever.chunks, provider)
+    generate("q", ids, retriever.chunks, provider)
+
+    live, cached = (s.attributes for s in by_name(spans)["generate"])
+    original = 1000 * 0.10 / 1e6 + 200 * 0.40 / 1e6
+    assert live["production_rag.cost_usd"] == pytest.approx(original)
+    assert "production_rag.recorded_cost_usd" not in live
+
+    assert cached["production_rag.cached"] is True
+    assert cached["production_rag.cost_usd"] == 0.0
+    assert json.loads(cached["langfuse.observation.cost_details"]) == {
+        "input": 0.0,
+        "output": 0.0,
+        "total": 0.0,
+    }
+    assert cached["production_rag.recorded_cost_usd"] == pytest.approx(original)
+    # Usage is reported as recorded, so token charts stay meaningful on a cached answer.
+    assert cached["gen_ai.usage.input_tokens"] == 1000
+
+
+def test_both_names_of_the_genai_provider_attribute_are_emitted(spans, retriever):
+    span = generate_span(spans, retriever, model="vendor/some-model:free")
+    assert span.attributes["gen_ai.system"] == "fake"
+    assert span.attributes["gen_ai.provider.name"] == "fake"
+
+
 # ---------------------------------------------------------------------------
 # content capture
 # ---------------------------------------------------------------------------
@@ -404,9 +439,7 @@ def test_an_exception_message_is_recorded_with_content_capture(spans, retriever,
     assert "unknown arm" in root.events[0].attributes["exception.message"]
 
 
-def test_a_provider_error_marks_the_generate_span_and_keeps_its_operational_message(
-    spans, retriever
-):
+def test_a_provider_error_marks_the_generate_span(spans, retriever):
     ids = retriever.retrieve("incremental models", arm="bm25", k=2, pool=4).chunk_ids
     answer = generate("q", ids, retriever.chunks, FakeProvider(fail=True))
     assert answer.refusal_reason == "provider_error"  # behaviour unchanged
@@ -415,7 +448,65 @@ def test_a_provider_error_marks_the_generate_span_and_keeps_its_operational_mess
     assert span.status.status_code == StatusCode.ERROR
     event = span.events[0]
     assert event.attributes["exception.type"] == "ProviderError"
-    assert "is down" in event.attributes["exception.message"]
+    # "fake is down" is not a recognised prefix, so no message leaves the process.
+    assert "exception.message" not in event.attributes
+
+
+class Raises:
+    """A provider whose call fails with a chosen exception."""
+
+    name = "raiser"
+    model = "raiser-1"
+
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+
+    def complete(self, prompt, **kwargs):
+        raise self.exc
+
+
+LEAK = "SECRET-QUESTION-TEXT"
+
+
+@pytest.mark.parametrize(
+    ("message", "exported"),
+    [
+        (f"HTTP 403 from https://api.example/v1/chat?q={LEAK}: " + LEAK * 3, "HTTP 403"),
+        (f"could not reach https://host/path?key={LEAK}: refused", "could not reach"),
+        (f"openrouter error: {LEAK}", "openrouter error"),
+        (f"unexpected response shape: {LEAK}", "unexpected response shape"),
+        (f"unexpected ollama response: {LEAK}", "unexpected ollama response"),
+        (f"all providers failed:\n  a(m): HTTP 500 from u: {LEAK}", "all providers failed"),
+        (f"replay mode: this prompt is not in the cache {LEAK}", "replay mode"),
+        (f"some new error shape that quotes {LEAK}", None),
+    ],
+)
+def test_provider_error_bodies_never_leave_the_process(spans, retriever, message, exported):
+    ids = retriever.retrieve("incremental models", arm="bm25", k=2, pool=4).chunk_ids
+    generate("q", ids, retriever.chunks, Raises(ProviderError(message)))
+
+    span = by_name(spans)["generate"][0]
+    assert LEAK not in dump(spans)
+    assert LEAK not in (span.status.description or "")
+    attrs = span.events[0].attributes
+    assert attrs["exception.type"] == "ProviderError"
+    assert attrs.get("exception.message") == exported
+
+
+def test_other_exception_types_export_no_message_even_if_they_look_operational(spans, retriever):
+    ids = retriever.retrieve("incremental models", arm="bm25", k=2, pool=4).chunk_ids
+    with pytest.raises(OSError):
+        generate("q", ids, retriever.chunks, Raises(OSError(f"HTTP 403 {LEAK}")))
+    assert LEAK not in dump(spans)
+    assert "exception.message" not in by_name(spans)["generate"][0].events[0].attributes
+
+
+def test_the_full_error_text_is_exported_only_with_content_capture(spans, retriever, monkeypatch):
+    monkeypatch.setenv(tracing.ENV_CONTENT, "1")
+    ids = retriever.retrieve("incremental models", arm="bm25", k=2, pool=4).chunk_ids
+    generate("q", ids, retriever.chunks, Raises(ProviderError(f"HTTP 403 from u: {LEAK}")))
+    message = by_name(spans)["generate"][0].events[0].attributes["exception.message"]
+    assert LEAK in message
 
 
 @pytest.mark.parametrize(
@@ -468,43 +559,79 @@ def test_an_unparseable_rewrite_is_marked_and_still_degrades_to_the_original(
 # ---------------------------------------------------------------------------
 # failure isolation: tracing must never break or alter a request
 # ---------------------------------------------------------------------------
+def without_clock(answer) -> dict:
+    """An answer's fields except the wall-clock time a failed call records."""
+    return {k: v for k, v in answer.as_dict().items() if k != "latency_s"}
+
+
 def baseline(retriever, reranker):
     return comparable(*full_pipeline(retriever, reranker))
 
 
-def test_a_failing_span_start_leaves_the_result_unchanged(retriever, reranker, monkeypatch, caplog):
-    expected = baseline(retriever, reranker)
-    exporter = InMemorySpanExporter()
-    tracing.setup_tracing(exporter, simple=True)
-
-    def boom(*args, **kwargs):
-        raise RuntimeError("tracer is broken")
-
-    monkeypatch.setattr(tracing._TRACER, "start_span", boom)
-    with caplog.at_level(logging.WARNING, logger="production_rag.tracing"):
-        got = comparable(*full_pipeline(retriever, reranker))
-        full_pipeline(retriever, reranker)  # a second request must not log again
-    assert got == expected
-    start_failures = [r for r in caplog.records if "tracing failed in start" in r.getMessage()]
-    # Once per call site, not once per request.
-    assert len({r.getMessage() for r in start_failures}) == len(start_failures)
+ISOLATION_METHODS = (
+    "start_span",
+    "set_attributes",
+    "set_attribute",
+    "add_event",
+    "set_status",
+    "end",
+)
 
 
-def test_failing_attribute_and_end_calls_leave_the_result_unchanged(
-    retriever, reranker, monkeypatch
-):
+def break_tracing(monkeypatch, method: str) -> None:
+    """Make one OpenTelemetry call raise, wherever the pipeline makes it."""
     from opentelemetry.sdk.trace import Span
 
-    expected = baseline(retriever, reranker)
-    exporter = InMemorySpanExporter()
-    tracing.setup_tracing(exporter, simple=True)
-
     def boom(*args, **kwargs):
-        raise RuntimeError("span is broken")
+        raise RuntimeError(f"{method} is broken")
 
-    for method in ("set_attributes", "set_attribute", "add_event", "set_status", "end"):
-        monkeypatch.setattr(Span, method, boom)
-    assert comparable(*full_pipeline(retriever, reranker)) == expected
+    target = tracing._TRACER if method == "start_span" else Span
+    monkeypatch.setattr(target, method, boom)
+
+
+@pytest.mark.parametrize("method", ISOLATION_METHODS)
+def test_a_failing_tracing_call_leaves_a_successful_request_unchanged(
+    method, retriever, reranker, monkeypatch, caplog
+):
+    expected = baseline(retriever, reranker)
+    tracing.setup_tracing(InMemorySpanExporter(), simple=True)
+    break_tracing(monkeypatch, method)
+    with caplog.at_level(logging.WARNING, logger="production_rag.tracing"):
+        assert comparable(*full_pipeline(retriever, reranker)) == expected
+        assert comparable(*full_pipeline(retriever, reranker)) == expected
+    # Logged once per call site, not once per request.
+    messages = [r.getMessage() for r in caplog.records if "tracing failed" in r.getMessage()]
+    assert len(messages) == len(set(messages))
+
+
+@pytest.mark.parametrize("method", ISOLATION_METHODS)
+def test_a_failing_tracing_call_leaves_a_failing_request_failing_the_same_way(
+    method, retriever, monkeypatch
+):
+    """set_status, add_event and the error attribute only run when a stage raised."""
+    ids = retriever.retrieve("incremental models", arm="bm25", k=2, pool=4).chunk_ids
+    off_answer = generate("q", ids, retriever.chunks, FakeProvider(fail=True))
+    with pytest.raises(ValueError, match="unknown arm"):
+        retriever.retrieve("q", arm="magic")
+
+    tracing.setup_tracing(InMemorySpanExporter(), simple=True)
+    break_tracing(monkeypatch, method)
+    on_answer = generate("q", ids, retriever.chunks, FakeProvider(fail=True))
+    assert without_clock(on_answer) == without_clock(off_answer)
+    with pytest.raises(ValueError, match="unknown arm"):
+        retriever.retrieve("q", arm="magic")
+
+
+def test_a_reply_object_that_fails_to_inspect_is_swallowed_by_the_classifier(spans):
+    class Hostile:
+        text = "{}"
+
+        @property
+        def finish_reason(self):
+            raise RuntimeError("cannot read finish_reason")
+
+    with tracing.llm_span("generate", provider=FakeProvider()) as span:
+        span.check_answer(Hostile())
 
 
 def test_a_failing_span_does_not_swallow_the_pipelines_own_exception(retriever, monkeypatch):

@@ -33,9 +33,11 @@ runs on a background thread with a bounded timeout, so an unreachable collector
 costs dropped spans and a log line, not request latency.
 
 **Errors.** A stage that raises gets status ERROR and an ``exception`` event
-carrying the exception type, and the message only for operational errors (provider
-HTTP failures, timeouts, cache misses) or when content capture is on. No stack
-trace is recorded: locals and frames can hold the question. The exception is then
+carrying the exception type. With content capture off, a message is exported only
+for provider and cache errors, and then only a fixed safe prefix (``HTTP 403``,
+``could not reach``, ``replay mode``): provider errors are built from response bodies
+and URLs, which can echo the prompt, so the body is never exported. No stack trace
+is recorded: locals and frames can hold the question. The exception is then
 re-raised unchanged. Failures the code already classifies (a truncated or
 unparseable reply, a fallback model answering) are attributes on the LLM span,
 ``production_rag.failure_kind``.
@@ -46,16 +48,21 @@ and prompt/response bodies are *not* exported unless
 always exported.
 
 **The LLM spans** carry the OpenTelemetry GenAI semantic-convention attributes
-(``gen_ai.system``, ``gen_ai.request.model``, ``gen_ai.response.model``,
+(``gen_ai.system`` and its newer name ``gen_ai.provider.name``,
+``gen_ai.request.model``, ``gen_ai.response.model``,
 ``gen_ai.usage.input_tokens``, ``gen_ai.usage.output_tokens``) and the attributes
 Langfuse maps to a *generation* with usage and cost
 (``langfuse.observation.type``, ``.usage_details``, ``.cost_details``).
 The cost is tokens x the price in :mod:`production_rag.pricing`; an unpriced model
 has its cost omitted and ``production_rag.cost_known`` set to false.
 
-A cached response keeps the tokens and latency of the call that was recorded:
-``production_rag.cached`` is true and ``production_rag.recorded_latency_s`` is that
-original latency, which is *not* the span's duration (a cache read).
+A cached response keeps the tokens and latency of the call that was recorded, but
+costs nothing now: ``production_rag.cached`` is true, the exported cost is 0, and
+``production_rag.recorded_cost_usd`` holds what the original call cost (when its price
+is known). ``production_rag.recorded_latency_s`` is the original latency, which is
+*not* the span's duration (a cache read). Summing ``cost_usd`` over a window therefore
+gives spend, and summing ``recorded_cost_usd`` gives what the same answers would cost
+uncached.
 """
 
 from __future__ import annotations
@@ -65,6 +72,7 @@ import contextvars
 import json
 import logging
 import os
+import re
 import threading
 from dataclasses import dataclass, field
 from typing import Any
@@ -77,18 +85,33 @@ ENV_CONTENT = "PRODUCTION_RAG_TRACE_CONTENT"
 ENV_EXPORT_TIMEOUT = "PRODUCTION_RAG_TRACE_EXPORT_TIMEOUT_S"
 ENV_ENDPOINTS = ("OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 
-#: Upper bound on one export attempt, in seconds. The SDK defaults are 10 s for the
-#: HTTP exporter and 30 s for the batch processor; a dead collector would hold the
-#: worker thread (and, at exit, the flush) for that long. Spans are best-effort, so
-#: the bound is short. Both SDK variables below still win when the operator sets them.
+#: Upper bound on one export attempt, in seconds, applied as the OTLP exporter's own
+#: timeout. That is the real bound: the SDK's batch processor accepts an export timeout
+#: but does not read it (its source says "Not used"), so it is not passed. The exporter's
+#: default is 10 s; a dead collector would hold the worker thread (and the flush at
+#: exit) that long per attempt. Spans are best-effort, so the bound is short. The
+#: standard OTEL_EXPORTER_OTLP_TIMEOUT variables still win when the operator sets them.
 DEFAULT_EXPORT_TIMEOUT_S = 5.0
 
 _PREFIX = "production_rag."
 _FALSE = {"0", "false", "no", "off"}
 _TRUE = {"1", "true", "yes", "on"}
-#: Exception types whose message is operational (an HTTP status, a timeout, a miss)
-#: rather than something that could quote the user's question.
-_SAFE_MESSAGE_TYPES = {"ProviderError", "CacheMiss", "LookupError", "TimeoutError"}
+#: Exceptions whose message may be reduced to a fixed prefix. Provider errors embed the
+#: response body and URL (``HTTP 403 from <url>: <body>``), and a body can echo the
+#: prompt, so only these prefixes ever leave the process with content capture off.
+_SAFE_MESSAGE_TYPES = {"ProviderError", "CacheMiss", "LookupError"}
+_SAFE_PREFIXES = (
+    "could not reach",
+    "replay mode",
+    "openrouter error",
+    "unexpected response shape",
+    "unexpected ollama response",
+    "non-JSON response",
+    "all providers failed",
+    "OPENROUTER_API_KEY is not set",
+    "no cached entry",
+)
+_HTTP_STATUS = re.compile(r"^HTTP (\d{3})\b")
 
 # Module state. `_TRACER is None` is the disabled fast path.
 _TRACER: Any = None
@@ -258,12 +281,9 @@ def build_tracer(
             )
             return None
     provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
-    if simple:
-        processor = SimpleSpanProcessor(exporter)
-    else:
-        bound = None if os.environ.get("OTEL_BSP_EXPORT_TIMEOUT") else export_timeout_s() * 1000
-        processor = BatchSpanProcessor(exporter, export_timeout_millis=bound)
-    provider.add_span_processor(processor)
+    provider.add_span_processor(
+        SimpleSpanProcessor(exporter) if simple else BatchSpanProcessor(exporter)
+    )
     api = (context, trace, Status, StatusCode)
     return TracerHandle(provider, provider.get_tracer("production_rag"), exporter, api)
 
@@ -356,8 +376,18 @@ def _clean(attrs: dict[str, Any]) -> dict[str, Any]:
 
 
 def _message_for(exc: BaseException) -> str:
-    if content_enabled() or type(exc).__name__ in _SAFE_MESSAGE_TYPES or isinstance(exc, OSError):
+    """The exception text that may be exported: all of it with content capture, else a prefix."""
+    if content_enabled():
         return str(exc)[:300]
+    if type(exc).__name__ not in _SAFE_MESSAGE_TYPES:
+        return ""
+    text = str(exc)
+    match = _HTTP_STATUS.match(text)
+    if match:
+        return f"HTTP {match.group(1)}"
+    for prefix in _SAFE_PREFIXES:
+        if text.startswith(prefix):
+            return prefix
     return ""
 
 
@@ -456,9 +486,11 @@ class _Live:
 
     def check_answer(self, response: Any) -> None:
         """Classify a reply the answer path will treat as unusable (runs only when tracing)."""
-        if self.span is None or str(response.finish_reason) == "length":
-            return  # a truncated reply is already marked by `record`
+        if self.span is None:
+            return
         try:
+            if str(response.finish_reason) == "length":
+                return  # a truncated reply is already marked by `record`
             from .providers import extract_json
 
             text = response.text
@@ -494,6 +526,7 @@ class _Live:
         fallback = "+" in requested_system and response.provider != requested_system.split("+")[0]
         details: dict[str, Any] = {
             "gen_ai.system": response.provider,
+            "gen_ai.provider.name": response.provider,
             "gen_ai.response.model": response.model,
             "gen_ai.usage.input_tokens": prompt_tokens,
             "gen_ai.usage.output_tokens": completion_tokens,
@@ -524,6 +557,14 @@ class _Live:
             details["production_rag.cost_known"] = False
         else:
             details["production_rag.cost_known"] = True
+        if response.cached:
+            # A cache hit spends nothing; the original call's cost is kept apart.
+            zero = {"input": 0.0, "output": 0.0, "total": 0.0}
+            details["production_rag.cost_usd"] = 0.0
+            details["langfuse.observation.cost_details"] = json.dumps(zero)
+            if cost is not None:
+                details["production_rag.recorded_cost_usd"] = cost.total
+        elif cost is not None:
             details["production_rag.cost_usd"] = cost.total
             details["langfuse.observation.cost_details"] = json.dumps(cost.as_dict())
         if fallback:
@@ -611,6 +652,7 @@ def llm_span(
         opening = {
             "gen_ai.operation.name": "chat",
             "gen_ai.system": getattr(provider, "name", ""),
+            "gen_ai.provider.name": getattr(provider, "name", ""),
             "gen_ai.request.model": model,
             "gen_ai.request.temperature": temperature,
             "gen_ai.request.max_tokens": max_tokens,

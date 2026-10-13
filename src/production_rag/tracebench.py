@@ -28,7 +28,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from . import tracing
+from . import quiet, tracing
 
 BENCH_ARM = "hybrid_score_weighted"
 BENCH_STRATEGY = "heading"
@@ -81,15 +81,36 @@ def overhead(off: Sequence[float], on: Sequence[float]) -> dict[str, float]:
     }
 
 
-def verdict(off_p50_ms: float, added_p50_ms: float) -> dict[str, Any]:
+def export_valid(row: dict[str, Any]) -> bool:
+    """Did every expected span reach the exporter, with no failed export?"""
+    return row["failed"] == 0 and row["spans_exported"] == row["spans_expected"]
+
+
+def verdict(
+    off_p50_ms: float, added_p50_ms: float, export: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """The registered verdict, or "invalid" if the export it measured did not work.
+
+    A condition whose spans were dropped or whose export failed did less work than the
+    one the budget is about, so a PASS from it would be a false PASS.
+    """
     limit = budget_limit_ms(off_p50_ms)
-    return {
+    result = {
         "rule": "added p50 <= max(1 ms, 5% of the tracing-off p50)",
         "off_p50_ms": off_p50_ms,
         "limit_ms": limit,
         "added_p50_ms": added_p50_ms,
-        "passed": added_p50_ms <= limit,
     }
+    if export is not None and not export_valid(export):
+        return {
+            **result,
+            "valid": False,
+            "passed": None,
+            "result": "invalid: export failed",
+            "export": {k: export[k] for k in ("spans_expected", "spans_exported", "failed")},
+        }
+    passed = added_p50_ms <= limit
+    return {**result, "valid": True, "passed": passed, "result": "pass" if passed else "fail"}
 
 
 def rotated(conditions: Sequence[str], shift: int) -> list[str]:
@@ -108,11 +129,18 @@ class CountingExporter:
         self.inner = inner
         self.exported = 0
         self.failed = 0
+        # CPU seconds the export worker thread spent inside `export`. Interleaving puts all
+        # conditions on one timeline and the batch worker exports on its own schedule, so some of
+        # this CPU is spent while an `off` sample is being timed. Reporting it per condition lets
+        # a reader see how large that leak could be.
+        self.worker_cpu_s = 0.0
 
     def export(self, spans: Sequence[Any]) -> Any:
         from opentelemetry.sdk.trace.export import SpanExportResult
 
+        started = time.thread_time()
         result = self.inner.export(spans)
+        self.worker_cpu_s += time.thread_time() - started
         self.exported += len(spans)
         if result != SpanExportResult.SUCCESS:
             self.failed += len(spans)
@@ -190,6 +218,28 @@ def run_conditions(
     return samples
 
 
+def check_gate(
+    skip: bool, runner: Callable[[], dict[str, Any]] = quiet.run_gate
+) -> tuple[dict[str, Any], bool]:
+    """Run the quiet-machine gate. Returns the record for the result file and whether to go on.
+
+    Fails closed: a gate that cannot be evaluated (an unsupported platform, a process listing
+    that errors) is a failed gate. ``skip`` is the explicit override and is recorded as such.
+    """
+    if skip:
+        return {
+            "skipped": True,
+            "passed": None,
+            "note": "gate overridden by --skip-quiet-gate",
+        }, True
+    try:
+        record = runner()
+    except Exception as exc:
+        record = {"passed": False, "error": f"{type(exc).__name__}: {exc}"}
+    record["skipped"] = False
+    return record, bool(record.get("passed"))
+
+
 def cmd_trace_bench(args: Any) -> int:
     from .cli import _embedder
     from .groundtruth import load_questions
@@ -253,8 +303,31 @@ def cmd_trace_bench(args: Any) -> int:
     if not args.otlp_endpoint:
         print("no --otlp-endpoint: the otlp condition is skipped and the verdict is not evaluated")
 
+    print(
+        "skipping the quiet-machine gate (recorded in the result)"
+        if args.skip_quiet_gate
+        else f"quiet-machine gate: sampling CPU for {quiet.GATE_SECONDS} s ...",
+        flush=True,
+    )
+    gate, proceed = check_gate(args.skip_quiet_gate)
+    if not proceed:
+        print(
+            f"quiet-machine gate FAILED, nothing measured: mean {gate.get('mean_pct')}%, "
+            f"max {gate.get('max_pct')}%, busy processes {gate.get('busy_processes')}, "
+            f"error {gate.get('error')}. Re-check later; do not start the run to see what happens."
+        )
+        return 3
+
+    try:
+        cpu_log = quiet.CpuLog(quiet.system_cpu_reader())
+    except NotImplementedError:
+        cpu_log = None
     started = time.perf_counter()
-    samples = run_conditions(work, len(texts), handles, repeats=args.repeats)
+    if cpu_log is not None:
+        with cpu_log:
+            samples = run_conditions(work, len(texts), handles, repeats=args.repeats)
+    else:
+        samples = run_conditions(work, len(texts), handles, repeats=args.repeats)
     elapsed = time.perf_counter() - started
 
     for handle in handles.values():
@@ -276,14 +349,19 @@ def cmd_trace_bench(args: Any) -> int:
         "added": {},
         "spans_per_query": spans_per_query,
         "export": {},
+        "quiet_gate": gate,
+        "cpu_log": cpu_log.summary() if cpu_log is not None else {"unavailable": True},
         "elapsed_s": elapsed,
         "environment": _environment(),
     }
     expected = spans_per_query * len(texts) * (args.repeats + 1)
+    timed_queries = len(texts) * (args.repeats + 1)
     result["export"]["in_memory"] = {
         "spans_expected": expected,
         "spans_exported": memory_counter.exported,
         "failed": memory_counter.failed,
+        "worker_cpu_s": memory_counter.worker_cpu_s,
+        "worker_cpu_ms_per_query": memory_counter.worker_cpu_s * 1000 / timed_queries,
     }
     for name in ("in_memory", "otlp"):
         if name in samples:
@@ -294,11 +372,22 @@ def cmd_trace_bench(args: Any) -> int:
             "spans_expected": expected,
             "spans_exported": otlp_counter.exported,
             "failed": otlp_counter.failed,
+            "worker_cpu_s": otlp_counter.worker_cpu_s,
+            "worker_cpu_ms_per_query": otlp_counter.worker_cpu_s * 1000 / timed_queries,
         }
+    for row in result["export"].values():
+        row["valid"] = export_valid(row)
+    result["export_worker_cpu_note"] = (
+        "CPU spent by the export worker thread, per condition. 'off' has none by construction. "
+        "Under interleaving the worker runs on its own schedule, so some of it can fall inside "
+        "an 'off' sample; this is its size."
+    )
 
     off_p50 = result["conditions"]["off"]["p50_ms"]
     if "otlp" in samples:
-        result["verdict"] = verdict(off_p50, result["added"]["otlp"]["added_p50_ms"])
+        result["verdict"] = verdict(
+            off_p50, result["added"]["otlp"]["added_p50_ms"], result["export"]["otlp"]
+        )
     else:
         result["verdict"] = {"evaluated": False, "reason": "no --otlp-endpoint was given"}
     result["in_memory_vs_budget"] = {
@@ -333,15 +422,24 @@ def format_bench(result: dict[str, Any]) -> str:
     for name, row in result["export"].items():
         lines.append(
             f"spans {name}: expected {row['spans_expected']}, exported {row['spans_exported']}, "
-            f"failed {row['failed']}"
+            f"failed {row['failed']}, export worker CPU {row['worker_cpu_s']:.2f} s "
+            f"({row['worker_cpu_ms_per_query']:.3f} ms/query)"
         )
+    gate = result["quiet_gate"]
+    lines.append(
+        "quiet gate: skipped"
+        if gate.get("skipped")
+        else f"quiet gate: mean {gate['mean_pct']}%, max {gate['max_pct']}%, passed"
+    )
     v = result["verdict"]
     if v.get("evaluated") is False:
         lines.append(f"verdict: not evaluated ({v['reason']})")
+    elif v["valid"] is False:
+        lines.append(f"verdict (otlp): {v['result']} -- not a pass and not a fail")
     else:
         lines.append(
             f"verdict (otlp): added p50 {v['added_p50_ms']:.3f} ms vs limit "
-            f"{v['limit_ms']:.3f} ms -> {'PASS' if v['passed'] else 'FAIL'}"
+            f"{v['limit_ms']:.3f} ms -> {v['result'].upper()}"
         )
     return "\n".join(lines)
 
@@ -410,6 +508,7 @@ def llm_rows(spans: Sequence[Any]) -> list[dict[str, Any]]:
                 "prompt_tokens": a.get("gen_ai.usage.input_tokens", 0),
                 "completion_tokens": a.get("gen_ai.usage.output_tokens", 0),
                 "cost_usd": a.get("production_rag.cost_usd"),
+                "recorded_cost_usd": a.get("production_rag.recorded_cost_usd"),
                 "cost_known": a.get("production_rag.cost_known"),
                 "replayed_read_s": (span.end_time - span.start_time) / 1e9,
                 "recorded_latency_s": a.get("production_rag.recorded_latency_s"),
@@ -536,7 +635,8 @@ def cmd_trace_replay(args: Any) -> int:
                     "prompt_tokens": sum(r["prompt_tokens"] for r in llm),
                     "completion_tokens": sum(r["completion_tokens"] for r in llm),
                     "cost_usd": sum(known),
-                    "cost_unknown_calls": sum(1 for r in llm if r["cost_usd"] is None),
+                    "recorded_cost_usd": sum(r["recorded_cost_usd"] or 0.0 for r in llm),
+                    "cost_unknown_calls": sum(1 for r in llm if r["cost_known"] is False),
                     "refused": answer.refused,
                     "refusal_reason": answer.refusal_reason,
                     "n_citations": len(answer.citations),
@@ -582,6 +682,7 @@ def cmd_trace_replay(args: Any) -> int:
             "prompt_tokens": sum(r["prompt_tokens"] for r in rows),
             "completion_tokens": sum(r["completion_tokens"] for r in rows),
             "cost_usd": sum(r["cost_usd"] for r in rows),
+            "recorded_cost_usd": sum(r["recorded_cost_usd"] for r in rows),
             "cost_unknown_calls": sum(r["cost_unknown_calls"] for r in rows),
         },
     }
@@ -615,7 +716,8 @@ def format_replay(out: dict[str, Any]) -> str:
     t = out["totals"]
     lines.append(
         f"total tokens in/out {t['prompt_tokens']}/{t['completion_tokens']}, "
-        f"cost ${t['cost_usd']:.4f} (unpriced calls: {t['cost_unknown_calls']})"
+        f"cost incurred ${t['cost_usd']:.4f} (every call was a cache hit), recorded cost "
+        f"${t['recorded_cost_usd']:.4f} (unpriced calls: {t['cost_unknown_calls']})"
     )
     lines.append("durations of LLM and rerank stages are cache reads (see timing_note)")
     return "\n".join(lines)
@@ -648,6 +750,12 @@ def register(subparsers: Any, add_component_args: Callable[[Any], None], index_d
         default=None,
         help="base OTLP/HTTP URL, e.g. http://127.0.0.1:3000/api/public/otel for Langfuse. "
         "Headers come from OTEL_EXPORTER_OTLP_HEADERS. Without it the otlp condition is skipped",
+    )
+    bench.add_argument(
+        "--skip-quiet-gate",
+        action="store_true",
+        help="do not require a quiet machine; recorded in the result. Smoke runs only: the "
+        "registered measurement runs with the gate",
     )
     bench.add_argument("--out", type=Path, default=Path("eval/results/tracing_overhead.json"))
     add_component_args(bench)
