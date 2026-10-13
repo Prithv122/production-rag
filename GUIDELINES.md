@@ -70,8 +70,11 @@ path (**not** Pydantic — deviation reasoned in NOTES.md) · Gradio on **Google
   never downloads torch weights; real-model tests are `@pytest.mark.slow`. Project 20
   shipped a 209s suite and had to disclose it in its own README — don't repeat that.
 - **Never commit the generation cache's raw API keys**; cache keys are prompt hashes only.
-- **Not an agent.** No LLM-in-a-loop, no LangGraph, no tool orchestration — that is
-  project 43 (`43-agent-system`). Query rewriting is a single measured step, not a loop.
+- **The served pipeline is not an agent.** No LLM-in-a-loop in the CLI default, the demo or the
+  deployment, no LangGraph, no tool orchestration — that is project 43 (`43-agent-system`). Query
+  rewriting is a single measured step. One bounded loop (the `agentic` arm: at most three judge calls,
+  retriever only) exists **as an evaluation arm**, registered in `NOTES.md` on 2026-10-13, and is never
+  wired into the served path.
 - **LLM-dependent steps must stay replayable.** Query rewrites and generations both go
   through the on-disk cache so `eval --replay` reproduces every published number with no
   key and no network. Anything that can't be replayed can't be in the README.

@@ -1578,3 +1578,116 @@ cannot be touched by it. CI is run on the final published commit before this sec
 chunk would enter the top ten of the real retriever) was never built, so nothing here says anything
 about end-to-end poisoning. Any stronger-model or stronger-attack study is a new registered experiment
 with its own frozen protocol, not a rerun of this one.
+
+## Agentic retrieval arm: registered protocol, frozen before any run (2026-10-13)
+
+Written and committed before the module that runs it exists and before any judge prompt has been sent
+to a model. Nothing below is edited after this commit; a change is a new, dated section that says what
+changed and why.
+
+**Scope change, recorded.** `GUIDELINES.md` said "Not an agent ... Query rewriting is a single measured
+step, not a loop." This experiment adds a bounded loop **as an evaluation arm only**. The served pipeline
+(CLI default, demo, Cloud Run) does not change and stays a fixed pipeline. The guideline line is amended in
+the same commit to say exactly that. Tool orchestration and general agents remain project 43.
+
+**Question.** Does a bounded loop that judges whether the retrieved evidence is sufficient, and re-queries
+when it is not, retrieve better than the fixed pipeline on this project's own questions, and what does
+the iteration cost (LLM calls, tokens, latency)? "No gain for its cost" is an allowed result.
+
+**Fixed inputs.**
+- Strategy `heading`, the existing indexes, `k = 10`, candidate pool 50.
+- Baseline arm: `hybrid_score_weighted`, the best first-stage arm in §5. No reranker anywhere in this
+  experiment (cost; and the loop is the variable under test, not the second stage).
+- Questions and labels: exactly the set and labels the retrieval table in §5 scores on `heading`, with
+  the same category split. The harness reports `n` per category rather than this section asserting it.
+- Model: `ollama-qwen-coder` (`qwen2.5-coder:7b-instruct-q3_K_M`), the arm the prompt-injection test
+  used. Temperature 0, `json_object` on, `num_ctx` 8192 explicit, judge `max_tokens` 200, no provider
+  fallback (a row answered by another model is a validity failure), the model digest recorded.
+  Four concurrent requests, as in the answer table and the injection run; latency is therefore
+  per-request latency under four concurrent requests, and is reported as that.
+- All LLM calls go through the on-disk cache so the result replays with no model.
+
+**The loop (arm `agentic`).** One step is one LLM call.
+1. Step 1 retrieves the original question with `hybrid_score_weighted` (pool 50). This ranking must be
+   identical to the baseline ranking (validity gate below).
+2. The judge sees the question and the top 5 passages of the current merged ranking, rendered with
+   `generate.Passage.render` (same header as the answer prompt), each passage text cut to 1,200
+   characters. Top 5, not 10, to bound prompt cost; recall@5 is a headline metric.
+3. If the reply says sufficient, the loop stops and the current merged ranking is final.
+4. If not, and fewer than 3 judge calls have been made, `next_query` is retrieved with
+   `hybrid_score_weighted` (pool 50), and the merged ranking becomes equal-weight RRF (k = 60) over the
+   pool-50 lists of every query issued so far, original first. Then back to step 2.
+   Equal weights, not a heavier original: with weights 2:1 a new chunk at rank 1 (1/61) scores below the
+   original's rank 50 (2/110), so a re-query could never change the top 10. Equal-weight fusion is the
+   `expand` design, the one §5 found keeps exact-term recall intact.
+5. At most 3 judge calls, so at most 2 re-queries; LLM calls per question are 1, 2 or 3.
+6. **Refusal.** The loop refuses when its last valid judge reply says insufficient, whether it stopped at
+   the step cap or because `next_query` repeated a query already issued (compared after lowercasing and
+   collapsing whitespace). A repeated query ends the loop without a retrieval.
+7. **Invalid reply** (no JSON object, `sufficient` not a boolean, or `sufficient` false with an empty or
+   over-300-character `next_query`): the loop stops, keeps the current ranking and does **not** refuse
+   (fails open to the fixed pipeline). Counted and reported.
+
+Judge prompt, exact. System: `You decide whether retrieved documentation passages are enough to answer a
+question. Reply with one JSON object and nothing else.` User:
+
+```text
+Question: {question}
+
+Passages:
+{passages}
+
+Can the question be answered fully and correctly from the text of these passages alone?
+If yes, reply {"sufficient": true}.
+If no, reply {"sufficient": false, "missing": "<one sentence: what is missing>", "next_query": "<one search query that would find it>"}.
+In next_query keep exact identifiers from the question (function names, settings, flags, commands) unchanged.
+Do not answer the question.
+```
+
+`{passages}` is the rendered passages joined by a blank line.
+
+**Primary outcome.** Δ nDCG@10 (agentic − baseline) over the answerable questions, paired bootstrap 95%
+percentile interval, 20,000 resamples, seed 20261013.
+
+**Verdict rule.**
+- **Gain:** Δ nDCG@10 ≥ +0.02 **and** the interval's lower bound > 0 **and** the refusal guardrail holds:
+  on the 60-question answer subset, agentic false refusal on its 54 answerable questions is at most 2
+  questions above the baseline's (5 points of 54, rounded down), and refusal recall on its 6 unanswerable
+  questions is not lower than the baseline's.
+- **Worse:** the interval's upper bound < 0.
+- **No gain for its cost:** anything else, including a gain that fails the refusal guardrail.
+- The verdict sentence always carries the cost: mean LLM calls per question, mean prompt and completion
+  tokens per question, p50 and p95 per-question loop latency, against the baseline's zero LLM calls and
+  its measured retrieval latency.
+
+**Secondary, descriptive only (not a verdict).** Δ recall@5 and Δ MRR with the same bootstrap; every
+metric by category, including `cross_tool` (n is tiny and is said so); the share of questions that
+iterated and the distribution of steps; the loop's own refusals on answerable and unanswerable
+questions; **judge calibration**: step-1 "sufficient" against whether any gold chunk is in the top 5
+(a 2 × 2 table), since the loop can only help if the judge's "insufficient" is informative.
+
+**Answer quality on the 60-question answer subset** (the subset of `eval/results/answers.json`: 54
+answerable, 6 unanswerable). For each question:
+- final agentic top 10 identical to the baseline top 10 and not refused: no generation; both arms share
+  the same answer by construction (counted as a tie);
+- otherwise (evidence changed, or the loop refused): the baseline answer **and**, unless the loop refused,
+  the agentic answer are both generated live with identical settings (the answer prompt and scoring in
+  `generate.py`/`answers.py` unedited, the answer budget of the answer table, `num_ctx` 8192). A loop
+  refusal is scored as a refusal with no generation.
+
+Live baseline answers are used instead of the published rows because the published rows predate the
+explicit 8,192-token window, and a paired comparison needs identical settings on both sides. For the
+tie rows, the shared answer is the published `ollama-qwen-coder` row. Reported: refusal recall, false
+refusal, grounded share and citation validity, paired, with the changed-question count stated. The
+guardrail above is computed from these paired rows.
+
+**Validity gates; any failure means no verdict, only a report of the failure.**
+1. Every step-1 ranking equals the baseline `hybrid_score_weighted`/`heading` top 10 recorded in
+   `eval/results/retrieval.json` for that question.
+2. Every judge and answer row was answered by the registered model; zero fallbacks.
+3. Invalid judge replies at most 5% of judge calls.
+4. Largest prompt below 8,192 tokens (nothing truncated by the window).
+
+**Run discipline.** One run. The result file is written by the run command and committed unedited; the
+write-up quotes it. An uninteresting result is not a reason for a second run. The harness is built and
+tested on a fake provider first, and gets a fresh-context review before any live call.
