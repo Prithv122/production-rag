@@ -1889,3 +1889,71 @@ cannot help: a stronger judge, a loop that may not refuse, or a different fusion
 lists are all untested and would each be a new registered experiment, not a rerun of this one. It
 does say that on this project, with this model, the loop's main measurable effect is extra refusals
 at more than a thousand times the latency.
+
+
+## Tracing: registered overhead budget, fixed before measuring (2026-10-13)
+
+Written and committed before the `trace-bench` and `trace-replay` commands were run for the first time. Nothing
+below is edited after this commit; a change is a new, dated section that says what changed and why.
+
+**What is being added.** A per-query trace of the served pipeline (`rag.query` with children `rewrite`,
+`retrieve.bm25`, `retrieve.dense`, `fuse`, `rerank`, `generate`), exported over OpenTelemetry (OTLP/HTTP) so
+that one exporter feeds either self-hosted Langfuse or Arize Phoenix. It is off unless an OTLP endpoint is
+configured; with it off, the code path is a no-op that does not import OpenTelemetry. Where the live
+deployment sends its traces is the owner's decision and is not made here. Question text and prompts are never
+exported unless `PRODUCTION_RAG_TRACE_CONTENT=1`, because the public demo takes arbitrary user input.
+
+**Question.** What does turning tracing on add to the per-query latency of the retrieval path, with batch
+export to a real collector, and is it small enough to leave on?
+
+**Fixed inputs.**
+- Strategy `heading`, arm `hybrid_score_weighted` (the arm the demo serves), `k = 10`, pool 50, the real
+  `bge-small-en-v1.5` query encoder, exact numpy dense search, the existing indexes. No reranker, no LLM:
+  this is the offline path whose latency is small enough that a fixed per-query tracing cost would show.
+- Questions: every question in `eval/questions.jsonl` whose `verified` is not `rejected`. The command prints
+  the count; 184 are expected.
+- One timed sample is the wall time of one `Retriever.retrieve` call, in milliseconds. It includes the cost
+  of creating and ending the spans, and it includes whatever the exporter's worker thread takes from the
+  interpreter while the query runs. It does not include the time the worker spends sending a batch.
+
+**Conditions, interleaved.** `off` (no tracer), `in_memory` (tracing on, batch processor, exporter that only
+stores spans: the SDK's own cost with no serialisation or network) and `otlp` (tracing on, batch processor,
+OTLP/HTTP to the endpoint given by `--otlp-endpoint`). For every (question, repeat) all three conditions run
+back to back, and the order is rotated by `(question index + repeat) mod 3`, so a drift in machine load lands
+on all three conditions and no condition is always first.
+
+**Sample size.** One untimed warm-up pass over all questions, then 5 timed repeats: 5 x 184 = 920 samples per
+condition. Percentiles are `numpy.percentile` with linear interpolation.
+
+**Budget.** The `otlp` condition passes if
+
+    added p50 = p50(otlp) - p50(off)  <=  max(1 ms, 5% of p50(off))
+
+p95 and the paired per-sample difference are reported and not gated. The `in_memory` condition is
+descriptive: it separates the SDK's cost from the cost of talking to a collector. The `otlp` condition is the
+registered measurement. If `--otlp-endpoint` is not given the condition is skipped, the result says so, and
+the verdict is "not evaluated"; a run without it is a smoke test and is not committed.
+
+**Known confound, stated now.** A collector on the same machine takes CPU while it ingests spans (Langfuse
+runs ClickHouse, Postgres, Redis and two Node services). That load is in the `otlp` numbers and is not tracing
+overhead in the sense of this repository's code. A failed gate is therefore reported as a failure first. Only
+then may a follow-up run send the same spans to a local sink that accepts and discards them, to separate
+client cost from collector load; it is a new dated section, and it does not replace the registered result.
+
+**Quiet-machine gate.** The same gate as the pgvector replication: sample total CPU once a second for 30
+seconds; the run starts only if the mean is below 15% and the maximum is below 40%, and no `llama-server`
+process exists. The Langfuse stack is started and left idle for the gate. CPU is logged every 2 seconds during
+the run as a description of the conditions, not as a second gate.
+
+**Run discipline.** One run. The result is written by the command to `eval/results/tracing_overhead.json` and
+committed unedited; a failed gate is a result, and the budget is not changed afterwards to make it pass.
+
+**Stage breakdown (`trace-replay`) is descriptive, not a budget.** It replays the full pipeline
+(rewrite `expand`, hybrid, rerank, generate) on the first N questions of the 60-question answer subset with
+every LLM and rerank result read from the committed caches; a cache miss is an error. Replayed LLM spans are
+cache reads, so their duration is not the model's latency; the latency recorded when the call was first made
+is exported as `production_rag.recorded_latency_s` and the two are labelled separately in the output.
+
+**Prices.** Every model this project has run is free: local Ollama models, and OpenRouter `:free` ids. Their
+price is 0 and the price table says so. A model that is not in the table has its cost omitted and flagged,
+not set to 0.
