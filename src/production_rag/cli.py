@@ -29,6 +29,7 @@ import atexit
 import json
 import os
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -59,6 +60,7 @@ INDEX_DIR = Path("indexes")
 EMBED_CACHE = Path(".cache/embeddings")
 RERANK_CACHE = Path(".cache/rerank")
 LLM_CACHE = Path(".cache/llm")
+AGENTIC_LLM_CACHE = Path(".cache/agentic-llm")
 
 
 # ---------------------------------------------------------------------------
@@ -986,6 +988,205 @@ def cmd_injection_run(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# agentic-run -- the registered agentic retrieval arm, run once
+# ---------------------------------------------------------------------------
+def _agentic_provider(args: argparse.Namespace):
+    """The one live provider for the judge and the live answers: the registered local model, no
+    fallback, an explicit 8,192-token window, and a cache of its own.
+
+    The cache directory is deliberately not the default `.cache/llm`. The live baseline answers
+    use the published answer prompt, whose cache key is the published row's; a shared directory
+    that already holds the published entries would hand those back as if they were generated
+    under the 8,192 window, which is exactly what the protocol replaces them to avoid.
+    """
+    from .agentic import MODEL_ARM, NUM_CTX
+
+    return build_provider(
+        MODEL_ARM, cache_dir=args.llm_cache, offline=False, fallback=False, num_ctx=NUM_CTX
+    )
+
+
+def _agentic_plan_lines(ag, inputs, step_one, plan) -> list[str]:
+    """What a run would do, from step one alone: sizes, call budget, baseline latency."""
+    scored = [s for s in inputs.specs if s.scored]
+    latency = sorted(step_one.latency_s[s.qid] for s in scored)
+    longest = max(
+        len(
+            ag.render_judge_prompt(
+                s.text, ag.judge_passages(step_one.rankings[s.qid], inputs.chunks)
+            )
+        )
+        for s in inputs.specs
+    )
+    categories = sorted({s.category for s in inputs.specs})
+    by_all = {c: sum(1 for s in inputs.specs if s.category == c) for c in categories}
+    by_scored = {c: sum(1 for s in scored if s.category == c) for c in categories}
+    by_scored = {c: n for c, n in by_scored.items() if n}
+    return [
+        f"questions run through the loop: {plan['loop_questions']} {by_all}",
+        f"questions scored on retrieval (have a gold chunk): {len(scored)} {by_scored}",
+        f"answer subset: {plan['answer_questions']} questions",
+        f"planned judge calls: {plan['judge_calls_min']} to {plan['judge_calls_max']} "
+        f"(1 to {ag.MAX_STEPS} per question)",
+        f"planned answer generations: {plan['answer_generations_min']} to "
+        f"{plan['answer_generations_max']} (decided by the loops; ties generate nothing)",
+        f"planned LLM calls, at most: {plan['llm_calls_max']} "
+        "(plus a live retry for each cut or empty answer)",
+        f"baseline retrieval latency, measured sequentially: "
+        f"p50 {statistics.median(latency) * 1000:.0f} ms, "
+        f"p95 {ag.percentile(latency, 0.95) * 1000:.0f} ms",
+        f"longest step-1 judge prompt: {longest:,} characters",
+    ]
+
+
+def cmd_agentic_run(args: argparse.Namespace) -> int:
+    """Run the registered loop once and write the result, or stop before any generation.
+
+    Order, and any failure exits without a language-model call: the output file must not exist;
+    the working tree must be clean (or `--allow-dirty`, recorded); the live cache must not be the
+    one that may hold the published answers; every input loads and cross-checks; the local model
+    must be listed; the indexes load and gate 1 holds on every question. Then the loops run,
+    then the answer phase, then the result is written once. `--dry-run` stops after gate 1 and
+    prints the call budget. `--phase loop` runs the loops only and writes nothing; rerunning the
+    command resumes from the cache either way.
+    """
+    from . import agentic as ag
+    from .groundtruth import index_chunks_by_doc
+
+    started = time.time()
+    timings: dict[str, float] = {}
+    try:
+        if not args.dry_run and args.phase == "all" and args.out.exists():
+            raise FileExistsError(f"{args.out} already exists; the run is made once")
+        commit, dirty = _git_state()
+        if dirty and not args.dry_run and not args.allow_dirty:
+            raise ValueError("the working tree is not clean (commit first, or pass --allow-dirty)")
+        if Path(args.llm_cache).resolve() == LLM_CACHE.resolve():
+            raise ValueError(
+                f"--llm-cache {args.llm_cache} may hold the published answers; use a cache of "
+                "this run's own (the default)"
+            )
+        chunks = {c.chunk_id: c for c in load_chunks(args.indexes, ag.STRATEGY)}
+        inputs = ag.load_inputs(
+            chunks,
+            index_chunks_by_doc(chunks.values()),
+            questions_path=args.questions,
+            results_path=args.results,
+            answers_path=args.answers,
+        )
+        provider = _agentic_provider(args)
+        expected = MODEL_ARMS[ag.MODEL_ARM]["model"]
+        if provider.model != expected:
+            raise ValueError(f"provider is {provider.model!r}, registered model is {expected!r}")
+        problem, digest = _ollama_ready(provider.inner.host, provider.model)
+        if problem and not args.dry_run:
+            raise ValueError(problem)
+        args.embed_cache = None  # queries only; the document vectors are in the index
+        retriever = Retriever.load(
+            args.indexes, ag.STRATEGY, embedder=_embedder(args), with_dense=True, chunks=chunks
+        )
+        retrieve = ag.LoopRetriever(retriever)
+        step_one = ag.prepare_step_one(inputs.specs, retrieve)
+    except (FileNotFoundError, FileExistsError, ValueError, KeyError, ModuleNotFoundError) as exc:
+        print(f"agentic-run: {exc}", file=sys.stderr)
+        return 1
+    timings["step_one_s"] = round(time.time() - started, 1)
+
+    gate = step_one.gate
+    print(
+        f"gate 1: {'ok' if gate['passed'] else 'FAILED'}, "
+        f"{gate['checked'] - gate['mismatched']} of {gate['checked']} step-1 rankings equal "
+        "the stored top 10"
+    )
+    if not gate["passed"]:
+        print(f"agentic-run: gate 1 failed, nothing generated: {gate['examples']}", file=sys.stderr)
+        return 1
+
+    plan = ag.plan_budget(len(inputs.specs), len(inputs.subset))
+    for line in _agentic_plan_lines(ag, inputs, step_one, plan):
+        print(line)
+    print(f"model {provider.model}, commit {commit[:7] or 'unknown'}{' (dirty)' if dirty else ''}")
+    if args.dry_run:
+        print(f"ollama: {problem or 'lists ' + provider.model}")
+        print("dry run: no language-model call was made")
+        return 0
+
+    counting = ag.CountingProvider(provider)
+    done = 0
+
+    def progress(item) -> None:
+        nonlocal done
+        done += 1
+        if done % 10 == 0:
+            print(f"  {done}", flush=True)
+
+    try:
+        print("loop phase")
+        loops = ag.run_loops(
+            inputs.specs, step_one, retrieve=retrieve, chunks=inputs.chunks, provider=counting,
+            workers=args.workers, progress=progress,
+        )  # fmt: skip
+        timings["loop_s"] = round(time.time() - started, 1)
+        if args.phase == "loop":
+            result = ag.build_result(inputs, step_one, loops, None, model=provider.model)
+            print("\n" + ag.format_report(result))
+            print(f"\nplanned answer generations: {ag.planned_generations(inputs, loops)}")
+            print("loop phase only: nothing written; rerun without --phase loop to continue")
+            return 0
+        print(f"answer phase: {ag.planned_generations(inputs, loops)} generations")
+        done = 0
+        pairs = ag.run_answers(inputs, loops, counting, workers=args.workers, progress=progress)
+        timings["answers_s"] = round(time.time() - started, 1)
+        result = ag.build_result(inputs, step_one, loops, pairs, model=provider.model)
+    except (ValueError, KeyError) as exc:
+        print(f"agentic-run: stopped, nothing saved: {exc}", file=sys.stderr)
+        return 1
+
+    steps = [s for loop in loops.values() for s in loop.steps]
+    live_rows = [
+        row
+        for pair in pairs
+        for row, source in (
+            (pair.baseline, pair.baseline_source),
+            (pair.agentic, pair.agentic_source),
+        )
+        if source == "live"
+    ]
+    answered = [r for r in live_rows if r.refusal_reason != "provider_error"]
+    config = {
+        **ag.run_config(provider.model),
+        "git_commit": commit,
+        "git_dirty": dirty,
+        "ollama_digest": digest,
+        "workers": args.workers,
+        "elapsed_s": round(time.time() - started, 1),
+        "timings": timings,
+        "llm_calls": counting.calls,
+        "llm_calls_from_cache": counting.cached,
+        "judge_calls": len(steps),
+        "judge_calls_from_cache": sum(1 for s in steps if s.cached),
+        "answer_generations": len(live_rows),
+        # Calls beyond one per answered live row are `generate`'s single live retry.
+        "answer_retries": counting.calls - sum(1 for s in steps if not s.error) - len(answered),
+        "llm_cache": str(args.llm_cache),
+    }
+    payload = {
+        "config": config,
+        "result": result,
+        "questions": ag.question_records(inputs, step_one, loops, result["retrieval"]),
+        "answers": ag.pair_records(pairs),
+    }
+    try:
+        ag.save(args.out, payload)
+    except FileExistsError as exc:
+        print(f"agentic-run: {exc}", file=sys.stderr)
+        return 1
+    print("\n" + ag.format_report(result))
+    print(f"\nwrote {args.out}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # wiring
 # ---------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
@@ -1269,6 +1470,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="run from an uncommitted tree; recorded in the result as git_dirty",
     )
     injection.set_defaults(func=cmd_injection_run)
+
+    from .agentic import OUT_PATH as AGENTIC_OUT
+
+    agentic = subparsers.add_parser(
+        "agentic-run",
+        help="run the registered agentic retrieval arm once (local model; --dry-run makes no call)",
+    )
+    agentic.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
+    agentic.add_argument("--results", type=Path, default=ANSWER_RESULTS_IN)
+    agentic.add_argument("--answers", type=Path, default=ANSWER_RESULTS_OUT)
+    agentic.add_argument("--indexes", type=Path, default=INDEX_DIR)
+    agentic.add_argument("--model", default=None, help="embedding model")
+    agentic.add_argument("--llm-cache", type=Path, default=AGENTIC_LLM_CACHE)
+    agentic.add_argument("--workers", type=int, default=4)
+    agentic.add_argument("--out", type=Path, default=AGENTIC_OUT)
+    agentic.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="load everything, check validity gate 1 and print the call budget; no LLM call",
+    )
+    agentic.add_argument(
+        "--phase",
+        choices=["all", "loop"],
+        default="all",
+        help="'loop' runs the judge loops only and writes nothing; rerun with 'all' to resume "
+        "from the cache and write the result",
+    )
+    agentic.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="run from an uncommitted tree; recorded in the result as git_dirty",
+    )
+    agentic.set_defaults(func=cmd_agentic_run)
 
     cache = subparsers.add_parser("cache", help="bundle or restore the replay caches")
     cache.add_argument(
