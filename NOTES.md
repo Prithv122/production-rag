@@ -2154,3 +2154,68 @@ hostname (`HOSTNAME: "0.0.0.0"` added in `34beb8f`).
 **Not done.** No live deployment, no hosted backend, no retention policy chosen, no measurement of
 span loss under Cloud Run CPU throttling or of shutdown flush time (both documented as risks in
 `space/DEPLOY.md`). Langfuse v4 untested.
+
+## HyDE arm: registered protocol, frozen before any run (2026-10-24)
+
+**Question.** HyDE (hypothetical document embeddings) has an LLM write a short answer to the
+question, embeds that answer, and searches with it, on the claim that a written answer sits closer
+to real answer passages than a short question does. This repo already rewrites queries and fuses BM25
+with dense search, so the question is narrow: does a HyDE draft improve retrieval over the plain
+query, alone in the dense leg and inside the live default hybrid, and what does it cost?
+
+**Scope.** Retrieval only. The draft is never shown to the answer generator, no answer is generated,
+the live app and its default arm are unchanged, and nothing is deployed.
+
+**Fixed inputs.** Strategy `heading`, k 10, pool 50, the 177 questions with a gold chunk (121
+conceptual, 52 exact_term, 4 cross_tool), gold lists as stored in `eval/results/retrieval.json`, the
+committed `heading` indexes and the shipped encoder (`BAAI/bge-small-en-v1.5`, queries with the BGE
+query prefix, documents without). All 184 questions get a draft; the 7 without gold are left out of
+every metric, as in §5.
+
+**Draft model and call.** `ollama-qwen` (`qwen2.5:7b-instruct-q3_K_M`, local, no key, no egress,
+$0), temperature 0, at most 128 output tokens, one call per question, no retry, cached in
+`.cache/hyde-llm` (its own directory). A call that returns no text is a failed draft: that question's
+HyDE arms fall back to the plain query and the failure is counted. The model was chosen for being
+the project's existing local model, not by trying several; a 3B model was timed once on one
+question before this was written and produced an invented SQL clause, which is why it was not used.
+
+**Draft prompt (frozen; the harness reads this block and a test compares it byte for byte).**
+
+    Write a short passage from technical documentation that answers the question below. Write it the way the documentation would, in two to four sentences, and include the exact names of any commands, functions or settings involved. Do not mention the question.
+
+    Question: {question}
+
+**Arms.** Six, three for each leg:
+
+| Arm | Dense query vector | Lexical leg |
+|---|---|---|
+| `dense` (baseline) | the question, with the BGE query prefix | none |
+| `dense_hyde` | the draft, encoded as a document (no prefix) | none |
+| `dense_avg` | the normalised mean of the two vectors above | none |
+| `hybrid_score_weighted` (baseline, the live default) | the question | BM25 on the question |
+| `hsw_hyde` | the draft | BM25 on the question |
+| `hsw_avg` | the normalised mean | BM25 on the question |
+
+Fusion, weights and pool for the hybrid arms are exactly the live default's (`score`, weights 2:1,
+pool 50). Only the dense query vector changes.
+
+**Baseline check (gate).** The two baseline arms are re-run with the same code path, and their
+per-question recall@5 and nDCG@10 must equal the stored `retrieval.json` values on all 177
+questions. If they don't, nothing is interpreted until the difference is explained.
+
+**Primary outcome.** The mean per-question difference in nDCG@10 between each HyDE arm and its
+baseline, over the 177 questions, with a paired bootstrap (20,000 resamples, seed 20261024, the
+interval convention of `evaluate.bootstrap_band`). Secondary: the same for recall@5, and both by
+question type (descriptive; 4 cross_tool questions are too few to read).
+
+**Decision rule, per arm (fixed now).** *Gain*: the interval's lower bound is above 0 and the mean
+difference is at least 0.02 (the bar the agentic arm used). *Worse*: the upper bound is below 0.
+Otherwise *no clear difference*. "No gain for its cost" is an allowed result.
+
+**Cost, reported beside every arm.** LLM calls per query (1 for every HyDE arm), draft output
+tokens (median), draft latency (median and p95, as recorded with the call; local CPU/GPU on this
+laptop, not a hosted model), and the added retrieval time of encoding a draft.
+
+**Failure case (exploratory, labelled as such).** Questions where a HyDE arm drops a gold chunk that
+the baseline had in its top 10, counted by type, with up to five examples quoted with the draft, to
+show whether the draft invented a wrong name for a corpus-specific term.
