@@ -1084,6 +1084,45 @@ def _agentic_plan_lines(ag, inputs, step_one, plan) -> list[str]:
     ]
 
 
+def cmd_hyde_run(args: argparse.Namespace) -> int:
+    """Run the HyDE protocol registered in NOTES.md and write `eval/results/hyde.json`."""
+    from . import hyde
+    from .providers import build_provider
+
+    commit, dirty = _git_state()
+    provider = build_provider(
+        hyde.MODEL_ARM,
+        cache_dir=args.llm_cache,
+        offline=args.replay,
+        fallback=False,
+        num_ctx=hyde.NUM_CTX,
+    )
+    result = hyde.run(
+        indexes=args.indexes,
+        retrieval_json=args.retrieval,
+        drafts_path=args.drafts,
+        out=args.out,
+        provider=provider,
+        commit=commit + ("-dirty" if dirty else ""),
+        phase=args.phase,
+    )
+    if result is None:
+        print(f"drafts written to {args.drafts}")
+        return 0
+    for gate in result["baseline_gate"]:
+        print(
+            f"baseline gate {gate['arm']}: {'pass' if gate['passes'] else 'FAIL'} "
+            f"({len(gate['mismatched'])} of {gate['questions']} differ)"
+        )
+    if result["comparisons"] is None:
+        print("baseline gate failed: nothing is compared")
+        return 1
+    print(hyde.format_report(result))
+    print(json.dumps(result["cost"], indent=2))
+    print(f"wrote {args.out}")
+    return 0
+
+
 def cmd_agentic_run(args: argparse.Namespace) -> int:
     """Run the registered loop once and write the result, or stop before any generation.
 
@@ -1618,6 +1657,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     agentic.add_argument("--bundle", type=Path, default=AGENTIC_BUNDLE)
     agentic.set_defaults(func=cmd_agentic_run)
+
+    hyde = subparsers.add_parser(
+        "hyde-run",
+        help="the registered HyDE arm: drafts (cached), then six arms against the stored gold",
+    )
+    hyde.add_argument("--indexes", type=Path, default=Path("indexes"))
+    hyde.add_argument("--retrieval", type=Path, default=Path("eval/results/retrieval.json"))
+    hyde.add_argument("--drafts", type=Path, default=Path("eval/results/hyde_drafts.json"))
+    hyde.add_argument("--out", type=Path, default=Path("eval/results/hyde.json"))
+    hyde.add_argument("--llm-cache", type=Path, default=Path(".cache/hyde-llm"))
+    hyde.add_argument("--phase", choices=["all", "drafts"], default="all")
+    hyde.add_argument("--replay", action="store_true", help="drafts from the cache only, no model")
+    hyde.set_defaults(func=cmd_hyde_run)
 
     cache = subparsers.add_parser("cache", help="bundle or restore the replay caches")
     cache.add_argument(

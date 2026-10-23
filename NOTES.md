@@ -2219,3 +2219,17 @@ laptop, not a hosted model), and the added retrieval time of encoding a draft.
 **Failure case (exploratory, labelled as such).** Questions where a HyDE arm drops a gold chunk that
 the baseline had in its top 10, counted by type, with up to five examples quoted with the draft, to
 show whether the draft invented a wrong name for a corpus-specific term.
+
+## HyDE arm: build-time choices, before any draft was used (2026-10-24)
+
+Fixed while building, where the protocol was silent; none is a tuning knob and no metric existed.
+- *Context window.* Ollama's default context (32,768 tokens) put 59% of the model on the CPU and took
+  about two minutes per draft. The prompt plus a 128-token draft is under 300 tokens, so the run uses
+  `num_ctx` 2,048 (about 15 s per draft). Five drafts made under the default before this was noticed
+  were deleted with their cache, so every draft comes from the same settings.
+- *Failed drafts.* A call that raises or returns blank text is a failed draft (no retry); its HyDE arms
+  use the plain query, and the count is in the result.
+- *Hybrid fusion.* The HyDE hybrids call the same `fuse` with the live default's fusion (`score`) and
+  weights (2, 1), lexical list first, over pool-50 lists, as `Retriever.retrieve` does; a test checks
+  both baselines against `Retriever.retrieve` on a toy index, and the run's baseline gate checks them
+  against the stored per-question metrics.
