@@ -83,15 +83,25 @@ SERVICE_NAME = "production-rag"
 ENV_ENABLE = "PRODUCTION_RAG_TRACING"
 ENV_CONTENT = "PRODUCTION_RAG_TRACE_CONTENT"
 ENV_EXPORT_TIMEOUT = "PRODUCTION_RAG_TRACE_EXPORT_TIMEOUT_S"
+ENV_FLUSH_MS = "PRODUCTION_RAG_TRACE_FLUSH_MS"
 ENV_ENDPOINTS = ("OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 
-#: Upper bound on one export attempt, in seconds, applied as the OTLP exporter's own
+#: Upper bound on one export call, retries included, in seconds, applied as the OTLP exporter's own
 #: timeout. That is the real bound: the SDK's batch processor accepts an export timeout
 #: but does not read it (its source says "Not used"), so it is not passed. The exporter's
 #: default is 10 s; a dead collector would hold the worker thread (and the flush at
-#: exit) that long per attempt. Spans are best-effort, so the bound is short. The
+#: exit) that long per export. Spans are best-effort, so the bound is short. The
 #: standard OTEL_EXPORTER_OTLP_TIMEOUT variables still win when the operator sets them.
 DEFAULT_EXPORT_TIMEOUT_S = 5.0
+
+#: Most a served request waits, in milliseconds, for its spans to leave before it returns.
+#: On Cloud Run with request-based billing the CPU is throttled once a response is sent,
+#: so a batch left on the worker thread can sit until the next request, or be lost when
+#: the instance stops. The flush is bounded and best-effort: past the budget the request
+#: returns anyway and the spans stay queued. ``0`` turns it off.
+DEFAULT_FLUSH_MS = 1000
+#: Ceiling on the budget, so a mistyped value cannot hold every request for a minute.
+MAX_FLUSH_MS = 2000
 
 _PREFIX = "production_rag."
 _FALSE = {"0", "false", "no", "off"}
@@ -315,6 +325,67 @@ def setup_tracing(exporter: Any = None, *, simple: bool = False) -> bool:
     return True
 
 
+def flush_budget_ms() -> int:
+    """The per-request flush budget, clamped to ``[0, MAX_FLUSH_MS]``."""
+    try:
+        return min(MAX_FLUSH_MS, max(0, int(os.environ.get(ENV_FLUSH_MS, DEFAULT_FLUSH_MS))))
+    except ValueError:
+        return DEFAULT_FLUSH_MS
+
+
+_FLUSH_THREAD: threading.Thread | None = None
+_FLUSH_LOCK = threading.Lock()
+
+
+def flush_after_request() -> str | None:
+    """Push the finished spans out before a served request returns. Never raises.
+
+    ``None`` when tracing is off or the budget is 0 (nothing was attempted). Otherwise
+    one of:
+
+    - ``"flushed"``: the export ran to completion within the budget. That is not proof
+      the collector *accepted* it: the SDK ignores the exporter's result, so a rejected
+      batch (a wrong key, a 429) shows up only as the OTLP exporter's own ERROR log.
+    - ``"timeout"``: the budget ran out. The flush carries on in the background and the
+      spans stay queued.
+    - ``"skipped"``: a flush from an earlier request is still running, so this one
+      returns at once; its spans leave on that flush, the next one, or the worker.
+    - ``"error"``: the flush raised (logged once).
+
+    The budget is enforced here, not by the SDK: ``force_flush`` in opentelemetry-sdk
+    1.45 ignores its timeout and exports synchronously, bounded only by the exporter's
+    timeout per export call (retries included). So the flush runs on a helper thread
+    and the request waits for it at most the budget.
+    """
+    global _FLUSH_THREAD
+    handle = _HANDLE
+    budget = flush_budget_ms()
+    if handle is None or budget == 0:
+        return None
+    try:
+        outcome: list[str] = []
+
+        def run() -> None:
+            try:
+                handle.flush(budget)
+                outcome.append("flushed")
+            except Exception:
+                _swallow("flush_after_request")
+                outcome.append("error")
+
+        with _FLUSH_LOCK:
+            if _FLUSH_THREAD is not None and _FLUSH_THREAD.is_alive():
+                return "skipped"
+            worker = threading.Thread(target=run, name="production-rag-flush", daemon=True)
+            _FLUSH_THREAD = worker
+            worker.start()
+        worker.join(budget / 1000)
+        return outcome[0] if outcome and not worker.is_alive() else "timeout"
+    except Exception:
+        _swallow("flush_after_request")
+        return "error"
+
+
 def shutdown_tracing() -> None:
     """Flush and stop the active tracer, then leave tracing off. Never raises."""
     handle = _HANDLE
@@ -328,8 +399,10 @@ def shutdown_tracing() -> None:
 
 def reset() -> None:
     """Shut down and forget the environment check, so the next span re-reads it. For tests."""
-    global _RESOLVED
+    global _RESOLVED, _FLUSH_THREAD
     shutdown_tracing()
+    with _FLUSH_LOCK:
+        _FLUSH_THREAD = None
     _RESOLVED = False
     _WARNED.clear()
 

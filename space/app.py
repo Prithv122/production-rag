@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 
 import gradio as gr
@@ -130,9 +131,21 @@ def run(question: str, arm: str, k: int, rerank: bool, answer_it: bool):
         return "Ask something.", "", []
     # One trace per question, covering retrieval and generation. A no-op unless an OTLP
     # endpoint is configured (see DEPLOY.md, "Tracing"); the question text is only
-    # exported when PRODUCTION_RAG_TRACE_CONTENT=1.
-    with tracing.query(question, arm=arm, k=k, strategy=STRATEGY, rerank=rerank) as root:
-        return _answer(question, arm, k, rerank, answer_it, root)
+    # exported when PRODUCTION_RAG_TRACE_CONTENT=1. The flush runs after the root span
+    # has closed, so the whole trace is in the batch; it is bounded and never raises.
+    try:
+        with tracing.query(question, arm=arm, k=k, strategy=STRATEGY, rerank=rerank) as root:
+            return _answer(question, arm, k, rerank, answer_it, root)
+    finally:
+        started = time.perf_counter()
+        outcome = tracing.flush_after_request()
+        if outcome is not None:
+            # The flush's cost to this request (the live overhead) and how it ended:
+            # flushed, timeout, skipped or error. "flushed" is not proof of delivery; a
+            # rejected export shows only as the OTLP exporter's own ERROR log.
+            logger.info(
+                "trace flush %.0f ms outcome=%s", 1000 * (time.perf_counter() - started), outcome
+            )
 
 
 def _answer(question: str, arm: str, k: int, rerank: bool, answer_it: bool, root):

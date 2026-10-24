@@ -49,6 +49,8 @@ def clean_tracing(monkeypatch):
         tracing.ENV_ENABLE,
         tracing.ENV_CONTENT,
         tracing.ENV_EXPORT_TIMEOUT,
+        tracing.ENV_FLUSH_MS,
+        "OTEL_BSP_SCHEDULE_DELAY",
         *tracing.ENV_ENDPOINTS,
     ):
         monkeypatch.delenv(name, raising=False)
@@ -697,3 +699,107 @@ def test_a_provider_that_raises_is_not_hidden_by_the_span(spans, retriever):
     span = by_name(spans)["generate"][0]
     assert span.status.status_code == StatusCode.ERROR
     assert ProviderError.__name__ not in span.events[0].attributes["exception.type"]
+
+
+class _SlowExporter(InMemorySpanExporter):
+    """Takes `delay` seconds per export, like a far-away collector."""
+
+    def __init__(self, delay: float) -> None:
+        super().__init__()
+        self.delay = delay
+
+    def export(self, spans):
+        import time
+
+        time.sleep(self.delay)
+        return super().export(spans)
+
+
+def test_the_request_flush_is_a_noop_when_tracing_is_off():
+    assert tracing.flush_after_request() is None
+
+
+def test_the_request_flush_exports_a_batched_trace_before_returning(monkeypatch):
+    exporter = InMemorySpanExporter()
+    assert tracing.setup_tracing(exporter, simple=False)  # batched, as on the server
+    with tracing.query(QUESTION, arm="hybrid"), tracing.stage("retrieve.bm25"):
+        pass
+    assert exporter.get_finished_spans() == ()  # still queued on the worker thread
+    assert tracing.flush_after_request() == "flushed"
+    assert {s.name for s in exporter.get_finished_spans()} == {"rag.query", "retrieve.bm25"}
+
+
+def test_the_request_flush_is_bounded_by_its_budget(monkeypatch):
+    import time
+
+    monkeypatch.setenv(tracing.ENV_FLUSH_MS, "100")
+    exporter = _SlowExporter(delay=1.5)
+    assert tracing.setup_tracing(exporter, simple=False)
+    with tracing.query(QUESTION):
+        pass
+    started = time.perf_counter()
+    done = tracing.flush_after_request()
+    waited = time.perf_counter() - started
+    assert done == "timeout" and waited < 1.0  # returned at the budget, not after the export
+    assert tracing._FLUSH_THREAD is not None and tracing._FLUSH_THREAD.is_alive()  # it did start
+
+
+def test_the_budget_is_clamped(monkeypatch):
+    monkeypatch.setenv(tracing.ENV_FLUSH_MS, "60000")
+    assert tracing.flush_budget_ms() == tracing.MAX_FLUSH_MS
+    monkeypatch.setenv(tracing.ENV_FLUSH_MS, "-5")
+    assert tracing.flush_budget_ms() == 0
+
+
+def test_a_zero_budget_or_a_failing_flush_never_reaches_the_request(monkeypatch, caplog):
+    assert tracing.setup_tracing(InMemorySpanExporter(), simple=False)
+    monkeypatch.setenv(tracing.ENV_FLUSH_MS, "0")
+    assert tracing.flush_after_request() is None
+    monkeypatch.setenv(tracing.ENV_FLUSH_MS, "not-a-number")
+    assert tracing.flush_budget_ms() == tracing.DEFAULT_FLUSH_MS
+
+    def boom(_timeout_ms):
+        raise RuntimeError("collector exploded")
+
+    monkeypatch.setattr(tracing._HANDLE, "flush", boom)
+    with caplog.at_level("WARNING", logger="production_rag.tracing"):
+        assert tracing.flush_after_request() == "error"
+    assert "flush_after_request" in caplog.text  # swallowed inside the thread, and logged
+
+
+def test_a_flush_still_running_is_not_doubled_up(monkeypatch):
+    monkeypatch.setenv(tracing.ENV_FLUSH_MS, "50")
+    assert tracing.setup_tracing(_SlowExporter(delay=0.6), simple=False)
+    with tracing.query(QUESTION):
+        pass
+    assert tracing.flush_after_request() == "timeout"  # budget passed, export still running
+    first = tracing._FLUSH_THREAD
+    assert first is not None and first.is_alive()
+    with tracing.query(QUESTION):
+        pass
+    assert tracing.flush_after_request() == "skipped"
+    assert tracing._FLUSH_THREAD is first  # no second thread was started
+    first.join(5)
+
+
+def test_concurrent_requests_start_one_flush_thread(monkeypatch):
+    import threading
+
+    monkeypatch.setenv(tracing.ENV_FLUSH_MS, "50")
+    assert tracing.setup_tracing(_SlowExporter(delay=0.6), simple=False)
+    with tracing.query(QUESTION):
+        pass
+    gate = threading.Barrier(4)
+    results: list[str | None] = []
+
+    def request():
+        gate.wait()
+        results.append(tracing.flush_after_request())
+
+    callers = [threading.Thread(target=request) for _ in range(4)]
+    for t in callers:
+        t.start()
+    for t in callers:
+        t.join(5)
+    assert sorted(results) == ["skipped", "skipped", "skipped", "timeout"]
+    tracing._FLUSH_THREAD.join(5)

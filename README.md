@@ -967,10 +967,11 @@ answered. That is the misattribution the correction in "Reranking and query rewr
 auditing the cache by hand; with tracing on it is visible on the first trace.
 
 > **Scope, stated plainly.** This is local instrumentation and a local overhead measurement. The
-> live Cloud Run service is unchanged and is **not traced**: hosting a trace backend is a cost and
-> data-retention decision that has not been made, and the options with estimated costs and the
-> privacy trade-offs are in [space/DEPLOY.md](space/DEPLOY.md). Turning it on there needs the `tracing`
-> extra in the image and environment variables, no code change.
+> live Cloud Run service is **not traced yet**. The backend was chosen on 2026-10-24 (Langfuse Cloud
+> Hobby, metadata only, request-based billing with a bounded flush before each response), and the
+> image now carries the `tracing` extra; switching it on needs a Langfuse project, its keys in Secret
+> Manager and a redeploy, all listed in [space/DEPLOY.md](space/DEPLOY.md) with the cost and privacy
+> trade-offs. The flush's live overhead and any lost traces are not measured yet, so not claimed.
 
 ### Against a framework implementation — LlamaIndex, measured elsewhere
 

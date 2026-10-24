@@ -2279,3 +2279,53 @@ commit and the measured draft-embedding time differ.
   exact-term), the q0024 example, "registered before any draft was written" (a timing pilot and five
   discarded drafts came first), "reproduces exactly", the untested BM25 explanation (now labelled),
   the missing gains next to losses, and the missing HyDE reference.
+
+## Tracing: live backend chosen, delivery hardened, not yet deployed (2026-10-24)
+
+**Owner's decision.** Langfuse Cloud Hobby for the live app, metadata only (no question, passage or
+answer text; credentials in Secret Manager), CPU throttling kept with request-based billing,
+`OTEL_BSP_SCHEDULE_DELAY=200`, a bounded best-effort flush before each response, telemetry never fatal,
+overhead measured and lost traces documented. Instance-based billing was rejected. Details and the
+owner's steps are in `space/DEPLOY.md`, "Decision (2026-10-24)". Hobby's 30 days is a data *access*
+window, not deletion (rechecked on langfuse.com the same day).
+
+**Found while building: the SDK ignores the flush timeout.** `opentelemetry-sdk` 1.45's
+`BatchSpanProcessor.force_flush(timeout_millis)` calls a blocking export of the whole queue and returns
+`True`; the timeout is never read. A test with a 1.5 s exporter and a 100 ms budget waited 1.5 s. So
+`tracing.flush_after_request` runs the flush on a helper thread and waits at most
+`PRODUCTION_RAG_TRACE_FLUSH_MS` (default 1000, capped at 2000); a lock keeps it to one flush thread at
+a time, and a request that finds one running returns at once.
+
+**Changed.** `space/Dockerfile` installs `.[embed,tracing]` with the two OpenTelemetry packages pinned
+to 1.45.1; `space/app.py` calls the flush in a `finally` after the root span closes and logs
+`trace flush <ms> ms outcome=<flushed|timeout|skipped|error>` per request. The `<ms>` figure is the
+live overhead. The outcome is *not* a delivery count: the SDK ignores the exporter's result, so a batch
+Langfuse rejects still logs `flushed`, and only the exporter's own `Failed to export … batch` ERROR
+line shows it. Lost traces will be counted as Langfuse traces against served requests. With no
+endpoint set, nothing is exported and the flush does nothing.
+
+**Fresh-eyes review, and what it changed.** A clean-context review of the staged diff found:
+- **A deploy blocker in DEPLOY.md.** The tracing command used `gcloud run services update
+  --set-secrets`, which replaces every secret binding and would have dropped `OPENROUTER_API_KEY`,
+  quietly turning generation off on the live demo. It also updated the old image (no `tracing` extra)
+  and used the example region instead of `asia-south1`. The owner steps are now explicit build, push
+  and `gcloud run deploy --update-env-vars --update-secrets` commands.
+- **The first log line overclaimed.** It logged `complete=<bool>`, with `True` read as "delivered".
+  It is now the four-way outcome above, and the docs say how losses are counted instead.
+- **A check-then-set race.** Two simultaneous requests started two flush threads in 194 of 200
+  trials. Harmless (Gradio runs at most two at once), but it contradicted the docstring. Fixed with a
+  lock; `reset()` now clears the thread too.
+- **Three tests could not fail.** The no-double test, the raising-flush test and the bound test all
+  passed with the guard they were meant to prove removed. They now assert thread identity, the
+  swallowed warning (via `caplog`) and that the flush thread started; a new test fires four requests
+  through a barrier and expects one `timeout` and three `skipped`. The fixture also clears
+  `OTEL_BSP_SCHEDULE_DELAY`, which would have made one assertion racy on a machine that sets it.
+- **Docs.** A key-safe recipe for the header secret (hidden prompt, no shell history), the IAM command,
+  all four Langfuse Cloud endpoints (EU, US, Japan, HIPAA), "per export call, retries included" instead
+  of "per attempt", and "not stated" for what happens past the Hobby cap. Python skips `atexit` on
+  SIGTERM by default, so the shutdown flush probably never runs on Cloud Run (not checked against
+  Gradio's server); DEPLOY.md now says the per-request flush may be the only delivery path.
+
+**Not done.** No Langfuse account, secret or redeploy (owner steps). No live overhead or loss number
+exists yet, so none is claimed; the 0.90 ms figure in the README is the local export overhead, not the
+flush. The rebuilt image has not been built or run.

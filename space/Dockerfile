@@ -48,7 +48,9 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu \
-        ".[embed]" \
+        ".[embed,tracing]" \
+        "opentelemetry-sdk==1.45.1" \
+        "opentelemetry-exporter-otlp-proto-http==1.45.1" \
         "gradio==6.26.0" \
         "huggingface-hub==1.30.0"
 
