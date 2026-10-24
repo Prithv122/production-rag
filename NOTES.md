@@ -2387,3 +2387,82 @@ provider (NVIDIA) at status -5 and 0% uptime over the last 30 minutes, while
 succeeded), `rewrite` and `rerank` spans (not on the default served path), behaviour past the Hobby
 cap, and span loss when Cloud Run stops an idle instance. Eight requests on one warm instance is a
 first reading: the flush figures are not percentiles, and the loss count says nothing about shutdown.
+
+## Generation fallback: local smoke test of the `nemotron-ultra` arm (2026-10-24)
+
+**Why.** The live arm, `nemotron-3-super:free`, has had 0% uptime on OpenRouter for at least a day
+(HTTP 404 on every call), so no live answer, and no live trace with tokens and cost, can be produced.
+`nemotron-3-ultra:free` was at about 99.9% uptime over the same day. This arm had never been run.
+
+**How.** The live module itself: `space/app.py` imported with `MODEL_ARM=nemotron-ultra` and its
+`run()` handler called on the default arm (`hybrid_score_weighted`, k 8, no rerank), with the local
+`heading` indexes, no tracing endpoint, and every cache in a scratch directory, so no committed cache,
+index or result changed. Provider calls and the `Answer` objects were observed, not altered. Three
+calls on the free tier, $0. No code change, no deploy.
+
+| Question | Outcome | Citations | Prompt / completion tokens | Latency | finish_reason |
+|---|---|---|---|---|---|
+| how do I read a parquet file in duckdb? | answered | 6 | 2,334 / 948 | 21.3 s | stop |
+| what does on_schema_change do in an incremental model? | answered | 5 | 1,964 / 685 | 19.9 s | stop |
+| how do I partition an asset by date in dagster? | refused by the model (`sufficient: false`) | 0 | 2,197 / 512 | 16.1 s | stop |
+
+**Against the structured-output contract.** The handler asks for `response_format: json_object` on
+every arm. Ultra's endpoint does not list `response_format`, and OpenRouter dropped it without an
+error. The model still returned the contract's JSON (`{"sufficient": …, "answer": …}`) on all three
+calls, and all three parsed on the first attempt: no provider error, no timeout, no retry, no
+truncation, no unparseable output. Completion tokens (512 to 948, reasoning included) stayed well under
+the arm's 2,048 budget. Three calls do not show that JSON holds without enforcement; an unparseable
+reply would be refused as `unparseable`, which is the designed behaviour, not a crash.
+
+**The refusal is defensible.** The top passage for the third question ("Create a time-based
+partitioned asset") says "copy the following code below" but its code block is missing from the
+`heading` chunk, and none of the eight passages names a partitions class. The context did not contain
+the answer, so refusing is the refusal path working. It is a chunking gap (code stripped), not a model
+failure; how `nemotron-super` handled the same context is unknown, since it cannot be called.
+
+**Production.** Switching would need only `MODEL_ARM=nemotron-ultra` as an environment variable: the
+arm is already in the deployed image's `MODEL_ARMS`, the same OpenRouter key works, and `pricing.py`
+prices it at $0, so traces would carry token usage and a known cost of $0. No secret changes. Not done:
+switching the live model is the owner's decision.
+
+## Tracing: live generation traced, P-13 complete (2026-10-24)
+
+**Change.** `gcloud run services update --update-env-vars MODEL_ARM=nemotron-ultra`, approved by the
+owner as a temporary fallback after the smoke test above. Revision `production-rag-00007-q8g`, same
+`:tracing` image, both secrets and both tracing variables kept, no content-capture variable, Ready.
+Ultra is a stopgap, not an evaluated replacement for `nemotron-super`: it has had the three smoke-test
+calls and the three live calls below, and no answer evaluation. Ending it is
+`--update-env-vars MODEL_ARM=nemotron-super`.
+
+**Startup failure, once.** The revision's first instance exited during `demo.launch()`: Gradio raised
+"When localhost is not accessible, a shareable link must be created" (its own startup check, before any
+model call; the same image started cleanly as `00006`). Cloud Run restarted it and the second instance
+came up cleanly at 17:15:03 UTC. The page returned 503 for about a minute. It is the only occurrence
+in 30 days of logs, so it is recorded, not diagnosed, and was not a reason to revert.
+
+**Live questions** (17:15:48 to 17:17:24 UTC, default arm, k 8, no rerank, through the public UI):
+
+| Question | Outcome | Citations (root span) | Input / output tokens | Generate span | Flush |
+|---|---|---|---|---|---|
+| how do I read a parquet file in duckdb? | answered | 8 | 2,334 / 1,108 | 21.33 s, `stop` | 390 ms |
+| what does on_schema_change do in an incremental model? | answered | 4 | 1,964 / 715 | 22.60 s, `stop` | 387 ms |
+| how do I configure the quantum flux capacitor in dbt? | refused (`model`) | 0 | 1,942 / 319 | 18.87 s, `stop` | 388 ms |
+
+**Verified in Langfuse, per `generate` span.** Type `GENERATION`, model
+`nvidia/nemotron-3-ultra-550b-a55b:free`, `usage_details` `{input, output, total}` equal to the
+`gen_ai.usage.*` attributes, `cost_details` `{input: 0, output: 0, total: 0}`, `cost_usd=0`,
+`cost_known=true`, `cached=false`, `fallback_used=false`, `model_substituted=false`. Langfuse shows
+$0.00 per span and "2k tokens"-style totals in the trace header. Input and output are empty on every
+span (content capture off). The citation counts are the root span's `n_citations`, which counts
+citation markers; the UI listed four distinct sources for the first answer.
+
+**Delivery, revision `00007`.** 3 requests served (`queue/join`, all 200), 3 `trace flush` lines, all
+`flushed`, 0 `Failed to export` lines and 0 ERROR lines after the restart, 3 `rag.query` traces in
+Langfuse (observations 37 → 52, which is 3 x 5 spans). Across both revisions: 11 served, 11 traced,
+0 lost. Flush on generating requests: 379 to 403 ms over 8 requests (median 385 ms).
+
+**P-13 outcome.** Complete against its stated criterion: a successful live generated answer whose trace
+carries verified token and cost fields, alongside the delivery evidence (no trace lost in 11). Still
+true and still stated: the samples are small, no live overhead budget was registered, the flush is
+paid by the user (about 2% of a 20 s ultra answer), span loss when an instance stops is unmeasured,
+cost is $0 only because both models are free tiers, and the live model is a temporary fallback.

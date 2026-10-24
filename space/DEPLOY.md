@@ -407,9 +407,24 @@ error appeared in the logs, and the
 flush took a median 383 ms on requests that call the model and 750 ms on retrieval-only requests
 (details in `NOTES.md`). No live budget was registered, so these are descriptions, not a pass or fail,
 and no successful generation was traced because the model provider returned HTTP 404 during the
-window. The sample says nothing about an instance being stopped, so treat the first
+window. After `MODEL_ARM=nemotron-ultra` (revision `00007`, a temporary fallback, see the README),
+three more requests gave 3 of 3 traces with token usage and a $0 cost on every `generate` span, and
+flushes of 387 to 390 ms. The sample says nothing about an instance being stopped, so treat the first
 week of live traces as incomplete, and keep counting lost traces by comparing Langfuse with the number
 of `trace flush` lines (see "How the flush is bounded").
+
+**Switching the generation model** is one environment variable and no rebuild, as long as the arm is
+in the image's `MODEL_ARMS`; `--update-env-vars` keeps the secrets and the tracing variables:
+
+```bash
+gcloud run services update production-rag --region asia-south1 --update-env-vars MODEL_ARM=nemotron-super
+```
+
+That is also the command that ends the current `nemotron-ultra` fallback. One startup failure was seen
+on the first instance of revision `00007`: Gradio's launch check raised "When localhost is not
+accessible, a shareable link must be created", the instance exited, and Cloud Run's restart a minute
+later came up cleanly. It is the only occurrence in 30 days of logs on the same image, so it is
+recorded as a flaky startup check, not diagnosed.
 
 Shutdown adds a second limit, if the flush at exit runs at all (see above). The exporter's own timeout
 is 5 seconds per export call, retries included

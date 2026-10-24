@@ -21,6 +21,14 @@
 >   **2 in 21.1 s**, and the unanswerable question returns **`Refused (model)`** with no
 >   citations. All three had refused as `unparseable` on the previous revision.
 >
+> **Temporary model fallback (since 2026-10-24).** The live service currently generates with
+> `nemotron-3-ultra:free` (revision `00007`, `MODEL_ARM=nemotron-ultra`), because the only free
+> endpoint for `nemotron-3-super` had 0% uptime over the preceding day and returned HTTP 404 on
+> every call. Ultra is a **stopgap, not an evaluated replacement**: it has not been through the
+> answer evaluation, a local smoke test (3 calls) and the live check below are all it has had, and
+> answers take about 19 to 23 s. The figures in the list above were measured on `nemotron-3-super`,
+> which goes back as soon as its endpoint recovers.
+>
 > Getting there took three wrong diagnoses, and the write-up keeps all of them: the defect was
 > that `max_tokens` is shared with a reasoning model's thinking trace, *plus* a second failure
 > where the model satisfies `response_format` with whitespace. Two causes, one refusal reason,
@@ -977,8 +985,10 @@ auditing the cache by hand; with tracing on it is visible on the first trace.
 > are a first reading, not percentiles, and say nothing about traces lost when an instance stops.
 > No live overhead budget was registered before deploying, so these figures describe the service;
 > they are not a pass or a fail.
-> The model provider was returning HTTP 404 during the window, so no successful live generation
-> span (tokens and cost) has been observed yet.
+> The model provider was returning HTTP 404 during that window. After the switch to the temporary
+> `nemotron-ultra` fallback, three more live questions (two cited answers, one correct refusal) gave
+> three complete `generate` spans with input/output token counts (for example 2,334 in / 1,108 out)
+> and a known cost of $0, flushes of 387 to 390 ms, and still no lost traces (11 of 11 overall).
 
 ### Against a framework implementation — LlamaIndex, measured elsewhere
 
