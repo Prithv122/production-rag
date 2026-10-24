@@ -133,3 +133,15 @@ def test_replay_reads_the_committed_drafts_and_refuses_a_gap(tmp_path) -> None:
             commit="x",
             replay=True,
         )
+
+
+def test_local_bootstrap_and_percentile_match_the_agentic_versions() -> None:
+    from production_rag import agentic
+
+    rng = np.random.default_rng(7)
+    diffs = {"a": list(rng.normal(size=40)), "b": list(rng.normal(size=40))}
+    assert hyde.paired_bootstrap(diffs, trials=500, seed=3) == agentic.paired_bootstrap(
+        diffs, trials=500, seed=3
+    )
+    values = list(rng.random(25))
+    assert hyde.percentile(values, 0.95) == agentic.percentile(values, 0.95)

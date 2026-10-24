@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import ast
 import json
+import math
+import random
 import time
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
@@ -23,7 +25,6 @@ from typing import Any
 
 import numpy as np
 
-from .agentic import paired_bootstrap, percentile
 from .dense import l2_normalise
 from .fuse import fuse
 from .groundtruth import load_questions
@@ -71,6 +72,41 @@ BASELINE_OF = {
     "hsw_hyde": BASELINE_HYBRID,
     "hsw_avg": BASELINE_HYBRID,
 }
+
+
+def paired_bootstrap(
+    diffs_by_metric: dict[str, Sequence[float]], *, trials: int, seed: int, alpha: float = 0.05
+) -> dict[str, dict[str, float]]:
+    """Paired bootstrap of the mean per-question difference, percentile interval.
+
+    The same convention as `agentic.paired_bootstrap` (a test checks they agree). Copied rather
+    than imported because no module outside the agentic arm and the CLI may import it.
+    """
+    n = len(next(iter(diffs_by_metric.values())))
+    if n == 0 or any(len(v) != n for v in diffs_by_metric.values()):
+        raise ValueError("every metric needs the same, non-empty set of questions")
+    rng = random.Random(seed)
+    population = range(n)
+    draws: dict[str, list[float]] = {name: [] for name in diffs_by_metric}
+    for _ in range(trials):
+        picked = rng.choices(population, k=n)
+        for name, diffs in diffs_by_metric.items():
+            draws[name].append(math.fsum(diffs[i] for i in picked) / n)
+    out: dict[str, dict[str, float]] = {}
+    for name, values in draws.items():
+        values.sort()
+        out[name] = {
+            "mean": math.fsum(diffs_by_metric[name]) / n,
+            "lo": values[int(alpha / 2 * trials)],
+            "hi": values[min(int((1 - alpha / 2) * trials), trials - 1)],
+        }
+    return out
+
+
+def percentile(values: Sequence[float], q: float) -> float:
+    """Nearest-rank-below percentile, `sorted[int(q * (n - 1))]`, as the retrieval table uses."""
+    ordered = sorted(values)
+    return ordered[int(q * (len(ordered) - 1))] if ordered else 0.0
 
 
 def render_prompt(question: str) -> str:
