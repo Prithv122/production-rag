@@ -401,8 +401,14 @@ requests, and the exporter sends batches from a background thread on a timer. Sp
 delayed until the next request, and an instance that is stopped with spans still queued loses them.
 The remedies are `--no-cpu-throttling` (instance-based billing, which costs more) or a short
 `OTEL_BSP_SCHEDULE_DELAY` (milliseconds) so batches leave sooner. The decision above takes the second,
-plus a bounded flush at the end of each request; neither has run on the live service yet. Treat the
-first week of live traces as incomplete, and count lost traces by comparing Langfuse with the number
+plus a bounded flush at the end of each request. First live reading (2026-10-24, revision `00006`,
+eight requests on one warm instance): 8 of 8 traces arrived, every flush ended `flushed`, no export
+error appeared in the logs, and the
+flush took a median 383 ms on requests that call the model and 750 ms on retrieval-only requests
+(details in `NOTES.md`). No live budget was registered, so these are descriptions, not a pass or fail,
+and no successful generation was traced because the model provider returned HTTP 404 during the
+window. The sample says nothing about an instance being stopped, so treat the first
+week of live traces as incomplete, and keep counting lost traces by comparing Langfuse with the number
 of `trace flush` lines (see "How the flush is bounded").
 
 Shutdown adds a second limit, if the flush at exit runs at all (see above). The exporter's own timeout

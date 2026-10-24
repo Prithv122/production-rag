@@ -2329,3 +2329,61 @@ endpoint set, nothing is exported and the flush does nothing.
 **Not done.** No Langfuse account, secret or redeploy (owner steps). No live overhead or loss number
 exists yet, so none is claimed; the 0.90 ms figure in the README is the local export overhead, not the
 flush. The rebuilt image has not been built or run.
+
+## Tracing: first live reading, no traces lost in a small sample (2026-10-24)
+
+**Deployed.** Revision `production-rag-00006-8jh`, image `:tracing`, 100% of traffic, endpoint Langfuse
+Cloud EU (`https://cloud.langfuse.com/api/public/otel`), header from Secret Manager `otel-headers`,
+`OTEL_BSP_SCHEDULE_DELAY=200`, flush budget at its default of 1000 ms. `OPENROUTER_API_KEY` is still
+bound (checked with `gcloud run services describe` after the deploy). One instance served every request
+(one `service.instance.id` on all spans).
+
+**Window.** 15:16:39 to 15:24:09 UTC, eight questions through the public UI: five with "generate an
+answer" ticked and three without, all on the default arm (`hybrid_score_weighted`, k 8, no rerank).
+
+**Lost traces: 0 of 8.**
+
+| Source | Count |
+|---|---|
+| Served requests (`POST /gradio_api/queue/join`, all 200) | 8 |
+| `trace flush` lines | 8, all `outcome=flushed`; no `timeout`, `skipped` or `error` |
+| OTLP exporter `Failed to export` lines, or any ERROR-severity line | 0 |
+| `rag.query` traces in Langfuse (past day) | 8, start times matching the requests to within a second |
+| Observations in Langfuse | 37 = 8 x (root, `retrieve.bm25`, `retrieve.dense`, `fuse`) + 5 `generate` |
+
+**Flush time per request (the live overhead).** The flush runs in the handler's `finally`, before the
+response returns, so this time is added to what the user waits for.
+
+| Request kind | n | Flush (ms) | Median | Rest of the request |
+|---|---|---|---|---|
+| With generation | 5 | 379, 379, 383, 383, 403 | 383 | 6.3 to 7.2 s (root span), all refused, see below |
+| Retrieval only | 3 | 742, 750, 758 | 750 | 0.05 to 0.13 s (root span) |
+
+The flush adds about 5 to 6% to a request that calls the model and roughly 6 to 15 times the work of a
+retrieval-only request. No live budget was registered before deploying, so this is a description, not a
+pass or fail. It is not comparable with the local +0.90 ms p50 result: that measured export on the
+background worker, off the request path, to a collector on the same machine; the live flush is a
+synchronous export from `asia-south1` to Langfuse's EU region, by design.
+
+Why retrieval-only flushes take twice as long is **not verified**. One explanation that fits: on a
+request that generates, the 200 ms worker sends the retrieval spans during the model call and the end
+flush reuses a warm connection, while a retrieval-only request finishes before the worker fires and the
+flush may have to open a new TLS connection to the EU endpoint. Checking it would need connection-level
+timing that the log line does not carry.
+
+**Privacy check.** Trace input and output are empty in Langfuse for all eight traces; the attributes are
+stage parameters (arm, k, pool size, top_k, fusion), model name, error type and the refusal reason.
+
+**Generation was down during the window, upstream.** All five generation calls were refused with
+`provider_error`: OpenRouter returned HTTP 404 ("Function … Not Found") for
+`nvidia/nemotron-3-super-120b-a12b:free`. OpenRouter's public endpoint list showed that model's only
+provider (NVIDIA) at status -5 and 0% uptime over the last 30 minutes, while
+`nvidia/nemotron-3-ultra-550b-a55b:free` was at 100%. The key is bound, so this is not the
+`--set-secrets` failure the deploy steps guard against. The traces recorded it correctly: each
+`generate` span is status ERROR with `error.type=ProviderError`, and each root carries
+`refused=true`, `refusal_reason=provider_error`.
+
+**Not observed, so not claimed.** A successful live `generate` span with token usage and cost (none
+succeeded), `rewrite` and `rerank` spans (not on the default served path), behaviour past the Hobby
+cap, and span loss when Cloud Run stops an idle instance. Eight requests on one warm instance is a
+first reading: the flush figures are not percentiles, and the loss count says nothing about shutdown.

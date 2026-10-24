@@ -966,12 +966,19 @@ replayed rewrite span is flagged `fallback`: the request named the hosted model 
 answered. That is the misattribution the correction in "Reranking and query rewriting" found by
 auditing the cache by hand; with tracing on it is visible on the first trace.
 
-> **Scope, stated plainly.** This is local instrumentation and a local overhead measurement. The
-> live Cloud Run service is **not traced yet**. The backend was chosen on 2026-10-24 (Langfuse Cloud
-> Hobby, metadata only, request-based billing with a bounded flush before each response), and the
-> image now carries the `tracing` extra; switching it on needs a Langfuse project, its keys in Secret
-> Manager and a redeploy, all listed in [space/DEPLOY.md](space/DEPLOY.md) with the cost and privacy
-> trade-offs. The flush's live overhead and any lost traces are not measured yet, so not claimed.
+> **Live service.** The Cloud Run app has been traced since 2026-10-24: Langfuse Cloud Hobby,
+> metadata only (no question, passage or answer text), request-based billing with a bounded flush
+> before each response; setup, cost and privacy trade-offs are in [space/DEPLOY.md](space/DEPLOY.md).
+> First reading, eight requests on one warm instance: **8 of 8 traces arrived**, with no export errors
+> in the logs, and the flush, which
+> the user waits for, took a median **383 ms** on requests that call the model (about 5% of a 6 to 7 s
+> request) and **750 ms** on retrieval-only requests (against 0.05 to 0.13 s of retrieval). That is
+> not the 0.90 ms above, which is export on a background thread to a local collector. Eight requests
+> are a first reading, not percentiles, and say nothing about traces lost when an instance stops.
+> No live overhead budget was registered before deploying, so these figures describe the service;
+> they are not a pass or a fail.
+> The model provider was returning HTTP 404 during the window, so no successful live generation
+> span (tokens and cost) has been observed yet.
 
 ### Against a framework implementation — LlamaIndex, measured elsewhere
 
