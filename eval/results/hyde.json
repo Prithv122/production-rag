@@ -1,0 +1,4577 @@
+{
+ "config": {
+  "protocol": "NOTES.md, HyDE arm: registered protocol (2026-10-24)",
+  "commit": "a6790d1cef301b248b14ac5a9093efabf7973f5f-dirty",
+  "model_arm": "ollama-qwen",
+  "model": "qwen2.5:7b-instruct-q3_K_M",
+  "max_tokens": 128,
+  "num_ctx": 2048,
+  "strategy": "heading",
+  "k": 10,
+  "pool": 50,
+  "bootstrap_trials": 20000,
+  "bootstrap_seed": 20261024,
+  "gain_bar": 0.02,
+  "n_scored": 177
+ },
+ "baseline_gate": [
+  {
+   "arm": "dense",
+   "questions": 177,
+   "mismatched": [],
+   "passes": true
+  },
+  {
+   "arm": "hybrid_score_weighted",
+   "questions": 177,
+   "mismatched": [],
+   "passes": true
+  }
+ ],
+ "comparisons": {
+  "dense_hyde": {
+   "baseline": "dense",
+   "mean": {
+    "ndcg@10": 0.45979041072929305,
+    "recall@5": 0.5536723163841808
+   },
+   "baseline_mean": {
+    "ndcg@10": 0.4993353013666508,
+    "recall@5": 0.5550847457627118
+   },
+   "difference": {
+    "ndcg@10": {
+     "mean": -0.03954489063735781,
+     "lo": -0.07963391884364954,
+     "hi": 0.0008020732101707974
+    },
+    "recall@5": {
+     "mean": -0.0014124293785310734,
+     "lo": -0.052259887005649715,
+     "hi": 0.05084745762711865
+    }
+   },
+   "decision": "no clear difference",
+   "by_category": {
+    "conceptual": {
+     "n": 121,
+     "ndcg@10_base": 0.44965308050263636,
+     "ndcg@10_arm": 0.4310317336744958,
+     "recall@5_base": 0.506198347107438,
+     "recall@5_arm": 0.5206611570247934
+    },
+    "cross_tool": {
+     "n": 4,
+     "ndcg@10_base": 0.0,
+     "ndcg@10_arm": 0.0,
+     "recall@5_base": 0.0,
+     "recall@5_arm": 0.0
+    },
+    "exact_term": {
+     "n": 52,
+     "ndcg@10_base": 0.6533524154053497,
+     "ndcg@10_arm": 0.5620781331629014,
+     "recall@5_base": 0.7115384615384616,
+     "recall@5_arm": 0.6730769230769231
+    }
+   }
+  },
+  "dense_avg": {
+   "baseline": "dense",
+   "mean": {
+    "ndcg@10": 0.5022596752749781,
+    "recall@5": 0.5833333333333334
+   },
+   "baseline_mean": {
+    "ndcg@10": 0.4993353013666508,
+    "recall@5": 0.5550847457627118
+   },
+   "difference": {
+    "ndcg@10": {
+     "mean": 0.002924373908327251,
+     "lo": -0.019820983614543264,
+     "hi": 0.025936080739852933
+    },
+    "recall@5": {
+     "mean": 0.02824858757062147,
+     "lo": -0.005649717514124294,
+     "hi": 0.06497175141242938
+    }
+   },
+   "decision": "no clear difference",
+   "by_category": {
+    "conceptual": {
+     "n": 121,
+     "ndcg@10_base": 0.44965308050263636,
+     "ndcg@10_arm": 0.46627427967219554,
+     "recall@5_base": 0.506198347107438,
+     "recall@5_arm": 0.5475206611570248
+    },
+    "cross_tool": {
+     "n": 4,
+     "ndcg@10_base": 0.0,
+     "ndcg@10_arm": 0.0,
+     "recall@5_base": 0.0,
+     "recall@5_arm": 0.0
+    },
+    "exact_term": {
+     "n": 52,
+     "ndcg@10_base": 0.6533524154053497,
+     "ndcg@10_arm": 0.6246302823718357,
+     "recall@5_base": 0.7115384615384616,
+     "recall@5_arm": 0.7115384615384616
+    }
+   }
+  },
+  "hsw_hyde": {
+   "baseline": "hybrid_score_weighted",
+   "mean": {
+    "ndcg@10": 0.6579088069278415,
+    "recall@5": 0.7062146892655368
+   },
+   "baseline_mean": {
+    "ndcg@10": 0.6580072716438361,
+    "recall@5": 0.7062146892655368
+   },
+   "difference": {
+    "ndcg@10": {
+     "mean": -9.846471599473675e-05,
+     "lo": -0.013668036249634858,
+     "hi": 0.013944216923621919
+    },
+    "recall@5": {
+     "mean": 0.0,
+     "lo": -0.01694915254237288,
+     "hi": 0.01694915254237288
+    }
+   },
+   "decision": "no clear difference",
+   "by_category": {
+    "conceptual": {
+     "n": 121,
+     "ndcg@10_base": 0.5897827898883783,
+     "ndcg@10_arm": 0.5850524510021886,
+     "recall@5_base": 0.6322314049586777,
+     "recall@5_arm": 0.6322314049586777
+    },
+    "cross_tool": {
+     "n": 4,
+     "ndcg@10_base": 0.0,
+     "ndcg@10_arm": 0.0,
+     "recall@5_base": 0.0,
+     "recall@5_arm": 0.0
+    },
+    "exact_term": {
+     "n": 52,
+     "ndcg@10_base": 0.867376336624331,
+     "ndcg@10_arm": 0.8780483125954445,
+     "recall@5_base": 0.9326923076923077,
+     "recall@5_arm": 0.9326923076923077
+    }
+   }
+  },
+  "hsw_avg": {
+   "baseline": "hybrid_score_weighted",
+   "mean": {
+    "ndcg@10": 0.6552449439054607,
+    "recall@5": 0.711864406779661
+   },
+   "baseline_mean": {
+    "ndcg@10": 0.6580072716438361,
+    "recall@5": 0.7062146892655368
+   },
+   "difference": {
+    "ndcg@10": {
+     "mean": -0.002762327738375407,
+     "lo": -0.010468912823897128,
+     "hi": 0.004207158006173751
+    },
+    "recall@5": {
+     "mean": 0.005649717514124294,
+     "lo": 0.0,
+     "hi": 0.01694915254237288
+    }
+   },
+   "decision": "no clear difference",
+   "by_category": {
+    "conceptual": {
+     "n": 121,
+     "ndcg@10_base": 0.5897827898883783,
+     "ndcg@10_arm": 0.5860089992105016,
+     "recall@5_base": 0.6322314049586777,
+     "recall@5_arm": 0.640495867768595
+    },
+    "cross_tool": {
+     "n": 4,
+     "ndcg@10_base": 0.0,
+     "ndcg@10_arm": 0.0,
+     "recall@5_base": 0.0,
+     "recall@5_arm": 0.0
+    },
+    "exact_term": {
+     "n": 52,
+     "ndcg@10_base": 0.867376336624331,
+     "ndcg@10_arm": 0.8667551185922282,
+     "recall@5_base": 0.9326923076923077,
+     "recall@5_arm": 0.9326923076923077
+    }
+   }
+  }
+ },
+ "cost": {
+  "llm_calls_per_query": 1,
+  "drafts": 177,
+  "failed_drafts": 0,
+  "draft_tokens_median": 79,
+  "draft_latency_s_median": 14.240166500036139,
+  "draft_latency_s_p95": 21.03486419998808,
+  "draft_encode_ms_median": 39.233699964825064,
+  "cost_usd": 0.0
+ },
+ "failures_exploratory": {
+  "dense_hyde": {
+   "questions_losing_gold": 15,
+   "by_category": {
+    "conceptual": 9,
+    "exact_term": 6
+   },
+   "examples": [
+    {
+     "qid": "q0005-duckdb-conceptual",
+     "category": "conceptual",
+     "draft": "To modify the default location where DuckDB searches for extensions, you can use the `SET` command to adjust the `EXTENSION_PATH` setting. This setting specifies the directory where DuckDB will look for extension files. For example, to set the extension path to `/usr/lib/duckdb`, you would execute the command: `SET EXTENSION_PATH = '/usr/lib/duckdb';`."
+    },
+    {
+     "qid": "q0013-dbt-exact_term",
+     "category": "exact_term",
+     "draft": "To rank rows in a dbt model by a specific column, you can utilize the `rank` window function within your SQL model. This function requires specifying the column by which you wish to rank the rows, as well as any partitioning criteria if necessary. For example, your model might include a line such as `rank() over (order by your_column_name asc) as rank_column`."
+    },
+    {
+     "qid": "q0024-duckdb-exact_term",
+     "category": "exact_term",
+     "draft": "To enable autocomplete in your shell, you need to configure the shell to recognize the available commands. This can be achieved by sourcing the `completions.sh` script, which is typically found in the `/usr/local/share/zsh-completions/` directory. Ensure that the `fpath` array includes this directory, and then source the `zsh-completions.zsh` file with the command `source /usr/local/share/zsh-completions/zsh-completions.zsh`."
+    },
+    {
+     "qid": "q0025-dagster-exact_term",
+     "category": "exact_term",
+     "draft": "To configure the local startup timeout for the code server in Dagster, you can modify the `dagster-daemon.yaml` configuration file. Specifically, you need to set the `code-server-startup-timeout` setting to your desired value in seconds. For example, to set it to 300 seconds, you would add or update the following line in the configuration file: `code-server-startup-timeout: 300`."
+    },
+    {
+     "qid": "q0044-duckdb-conceptual",
+     "category": "conceptual",
+     "draft": "To configure DuckDB tests to use a persistent database rather than an in-memory database, you should set the `DB_PATH` environment variable to a valid file path before running the tests. This can be done by executing the command `export DB_PATH=/path/to/your/database.db` in your terminal before initiating the test suite."
+    }
+   ]
+  },
+  "dense_avg": {
+   "questions_losing_gold": 3,
+   "by_category": {
+    "exact_term": 1,
+    "conceptual": 2
+   },
+   "examples": [
+    {
+     "qid": "q0025-dagster-exact_term",
+     "category": "exact_term",
+     "draft": "To configure the local startup timeout for the code server in Dagster, you can modify the `dagster-daemon.yaml` configuration file. Specifically, you need to set the `code-server-startup-timeout` setting to your desired value in seconds. For example, to set it to 300 seconds, you would add or update the following line in the configuration file: `code-server-startup-timeout: 300`."
+    },
+    {
+     "qid": "q0067-duckdb-conceptual",
+     "category": "conceptual",
+     "draft": "To utilize the unique function in DuckDB for removing duplicate rows based on a specific column, you can execute the `SELECT DISTINCT` statement, specifying the column name within the query. For example, to remove duplicates based on the column named `id`, you would run: `SELECT DISTINCT id FROM your_table_name;`."
+    },
+    {
+     "qid": "q0108-dbt-conceptual",
+     "category": "conceptual",
+     "draft": "The `agg_time_dimension` configuration setting is used to specify the time granularity for aggregating data in time-series analysis. This setting allows you to define the time dimension at which data should be aggregated, such as by minute, hour, day, or custom intervals, influencing the resolution and performance of your analytics operations. For instance, setting `agg_time_dimension` to `hour` ensures that data is aggregated into hourly intervals, which can be crucial for real-time analytics and reporting."
+    }
+   ]
+  },
+  "hsw_hyde": {
+   "questions_losing_gold": 2,
+   "by_category": {
+    "exact_term": 1,
+    "conceptual": 1
+   },
+   "examples": [
+    {
+     "qid": "q0013-dbt-exact_term",
+     "category": "exact_term",
+     "draft": "To rank rows in a dbt model by a specific column, you can utilize the `rank` window function within your SQL model. This function requires specifying the column by which you wish to rank the rows, as well as any partitioning criteria if necessary. For example, your model might include a line such as `rank() over (order by your_column_name asc) as rank_column`."
+    },
+    {
+     "qid": "q0100-duckdb-conceptual",
+     "category": "conceptual",
+     "draft": "The number of sample streams in the monitor is determined by the `sample-stream-count` setting within the configuration file. This setting specifies the total number of streams to be monitored and can be adjusted according to the system's requirements. For precise control, ensure that the `sample-stream-count` is set to a value that aligns with the monitoring objectives and system capabilities."
+    }
+   ]
+  },
+  "hsw_avg": {
+   "questions_losing_gold": 0,
+   "by_category": {},
+   "examples": []
+  }
+ },
+ "per_question": {
+  "dense": {
+   "q0001-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0002-dbt-conceptual": {
+    "ndcg@10": 0.3562071871080222,
+    "recall@5": 0.0
+   },
+   "q0003-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0004-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0005-duckdb-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0006-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0007-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0008-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0009-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0010-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0011-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0012-duckdb-conceptual": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0013-dbt-exact_term": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0014-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0015-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0016-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0017-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0018-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0019-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0020-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0021-duckdb-conceptual": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0022-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0023-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0024-duckdb-exact_term": {
+    "ndcg@10": 0.3562071871080222,
+    "recall@5": 0.0
+   },
+   "q0025-dagster-exact_term": {
+    "ndcg@10": 0.3010299956639812,
+    "recall@5": 0.0
+   },
+   "q0026-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0027-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0028-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0029-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0030-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0031-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0032-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0033-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0034-duckdb-conceptual": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0035-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0036-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0037-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0038-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0039-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0040-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0041-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0042-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0043-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0044-duckdb-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0045-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0046-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0047-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0048-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0049-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0050-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0051-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0052-dagster-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0053-duckdb-conceptual": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0054-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0055-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0056-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0057-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0058-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0059-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0060-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0061-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0062-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0063-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0065-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0066-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0067-duckdb-conceptual": {
+    "ndcg@10": 0.3562071871080222,
+    "recall@5": 0.0
+   },
+   "q0068-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0069-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0070-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0071-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0072-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0073-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0074-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0075-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0076-duckdb-exact_term": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0077-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0078-dagster-exact_term": {
+    "ndcg@10": 0.31546487678572877,
+    "recall@5": 0.0
+   },
+   "q0079-duckdb-exact_term": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0080-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0081-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0082-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0083-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0084-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0085-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0086-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0087-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0088-dbt-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0089-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0090-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0091-duckdb-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0092-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0093-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0094-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0095-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0096-duckdb-conceptual": {
+    "ndcg@10": 0.3010299956639812,
+    "recall@5": 0.0
+   },
+   "q0097-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0098-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0099-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0100-duckdb-conceptual": {
+    "ndcg@10": 0.3010299956639812,
+    "recall@5": 0.0
+   },
+   "q0101-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0102-dagster-conceptual": {
+    "ndcg@10": 0.3562071871080222,
+    "recall@5": 0.0
+   },
+   "q0103-duckdb-exact_term": {
+    "ndcg@10": 0.6052602440527057,
+    "recall@5": 0.5
+   },
+   "q0104-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0105-dagster-conceptual": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0106-dagster-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0107-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0108-dbt-conceptual": {
+    "ndcg@10": 0.3010299956639812,
+    "recall@5": 0.0
+   },
+   "q0109-dagster-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0110-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0111-dbt-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0112-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0113-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0114-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0115-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0116-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0117-dbt-conceptual": {
+    "ndcg@10": 0.3903800499921017,
+    "recall@5": 0.25
+   },
+   "q0118-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0119-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0120-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0121-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0122-duckdb-conceptual": {
+    "ndcg@10": 0.2890648263178879,
+    "recall@5": 0.0
+   },
+   "q0123-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0124-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0125-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0126-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0127-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0128-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0129-dbt-conceptual": {
+    "ndcg@10": 0.9197207891481876,
+    "recall@5": 1.0
+   },
+   "q0130-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0131-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0132-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0133-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0134-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0135-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0136-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0137-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0138-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0139-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0140-dbt-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0141-dagster-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0142-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0143-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0144-duckdb-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0145-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0146-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0147-duckdb-exact_term": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0148-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0149-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0150-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0151-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0152-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0153-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0154-dagster-exact_term": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0155-dbt-exact_term": {
+    "ndcg@10": 0.8065735963827293,
+    "recall@5": 0.5
+   },
+   "q0156-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0157-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0158-dbt-exact_term": {
+    "ndcg@10": 0.17723928678404774,
+    "recall@5": 0.0
+   },
+   "q0159-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0160-duckdb-exact_term": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0161-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0162-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0163-dagster-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0164-duckdb-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0167-dbt-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0169-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0170-dbt-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0171-duckdb-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0172-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0173-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0174-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0175-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0176-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0177-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0178-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0179-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0180-duckdb-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0181-duckdb-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   }
+  },
+  "dense_hyde": {
+   "q0001-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0002-dbt-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0003-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0004-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0005-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0006-duckdb-conceptual": {
+    "ndcg@10": 0.39564672360221187,
+    "recall@5": 0.0
+   },
+   "q0007-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0008-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0009-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0010-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0011-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0012-duckdb-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0013-dbt-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0014-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0015-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0016-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0017-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0018-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0019-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0020-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0021-duckdb-conceptual": {
+    "ndcg@10": 0.31546487678572877,
+    "recall@5": 0.0
+   },
+   "q0022-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0023-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0024-duckdb-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0025-dagster-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0026-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0027-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0028-dbt-exact_term": {
+    "ndcg@10": 0.3562071871080222,
+    "recall@5": 0.0
+   },
+   "q0029-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0030-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0031-dbt-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0032-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0033-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0034-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0035-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0036-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0037-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0038-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0039-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0040-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0041-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0042-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0043-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0044-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0045-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0046-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0047-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0048-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0049-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0050-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0051-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0052-dagster-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0053-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0054-dagster-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0055-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0056-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0057-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0058-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0059-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0060-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0061-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0062-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0063-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0065-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0066-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0067-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0068-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0069-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0070-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0071-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0072-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0073-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0074-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0075-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0076-duckdb-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0077-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0078-dagster-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0079-duckdb-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0080-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0081-dbt-conceptual": {
+    "ndcg@10": 0.3010299956639812,
+    "recall@5": 0.0
+   },
+   "q0082-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0083-duckdb-conceptual": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0084-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0085-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0086-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0087-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0088-dbt-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0089-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0090-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0091-duckdb-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0092-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0093-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0094-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0095-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0096-duckdb-conceptual": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0097-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0098-dagster-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0099-dagster-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0100-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0101-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0102-dagster-conceptual": {
+    "ndcg@10": 0.3010299956639812,
+    "recall@5": 0.0
+   },
+   "q0103-duckdb-exact_term": {
+    "ndcg@10": 0.6052602440527057,
+    "recall@5": 0.5
+   },
+   "q0104-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0105-dagster-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0106-dagster-conceptual": {
+    "ndcg@10": 0.3010299956639812,
+    "recall@5": 0.0
+   },
+   "q0107-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0108-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0109-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0110-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0111-dbt-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0112-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0113-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0114-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0115-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0116-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0117-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0118-duckdb-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0119-duckdb-conceptual": {
+    "ndcg@10": 0.2890648263178879,
+    "recall@5": 0.0
+   },
+   "q0120-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0121-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0122-duckdb-conceptual": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0123-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0124-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0125-dbt-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0126-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0127-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0128-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0129-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0130-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0131-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0132-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0133-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0134-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0135-dagster-conceptual": {
+    "ndcg@10": 0.2890648263178879,
+    "recall@5": 0.0
+   },
+   "q0136-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0137-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0138-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0139-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0140-dbt-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0141-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0142-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0143-dbt-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0144-duckdb-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0145-dagster-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0146-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0147-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0148-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0149-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0150-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0151-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0152-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0153-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0154-dagster-exact_term": {
+    "ndcg@10": 0.31546487678572877,
+    "recall@5": 0.0
+   },
+   "q0155-dbt-exact_term": {
+    "ndcg@10": 0.430624116386567,
+    "recall@5": 0.5
+   },
+   "q0156-dagster-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0157-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0158-dbt-exact_term": {
+    "ndcg@10": 0.19342640361727081,
+    "recall@5": 0.0
+   },
+   "q0159-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0160-duckdb-exact_term": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0161-dagster-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0162-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0163-dagster-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0164-duckdb-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0167-dbt-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0169-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0170-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0171-duckdb-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0172-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0173-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0174-dagster-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0175-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0176-dagster-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0177-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0178-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0179-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0180-duckdb-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0181-duckdb-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   }
+  },
+  "dense_avg": {
+   "q0001-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0002-dbt-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0003-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0004-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0005-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0006-duckdb-conceptual": {
+    "ndcg@10": 0.3889580943680543,
+    "recall@5": 0.0
+   },
+   "q0007-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0008-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0009-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0010-dagster-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0011-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0012-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0013-dbt-exact_term": {
+    "ndcg@10": 0.3010299956639812,
+    "recall@5": 0.0
+   },
+   "q0014-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0015-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0016-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0017-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0018-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0019-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0020-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0021-duckdb-conceptual": {
+    "ndcg@10": 0.3562071871080222,
+    "recall@5": 0.0
+   },
+   "q0022-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0023-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0024-duckdb-exact_term": {
+    "ndcg@10": 0.2890648263178879,
+    "recall@5": 0.0
+   },
+   "q0025-dagster-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0026-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0027-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0028-dbt-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0029-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0030-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0031-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0032-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0033-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0034-duckdb-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0035-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0036-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0037-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0038-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0039-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0040-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0041-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0042-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0043-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0044-duckdb-conceptual": {
+    "ndcg@10": 0.2890648263178879,
+    "recall@5": 0.0
+   },
+   "q0045-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0046-dbt-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0047-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0048-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0049-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0050-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0051-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0052-dagster-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0053-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0054-dagster-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0055-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0056-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0057-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0058-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0059-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0060-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0061-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0062-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0063-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0065-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0066-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0067-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0068-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0069-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0070-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0071-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0072-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0073-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0074-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0075-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0076-duckdb-exact_term": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0077-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0078-dagster-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0079-duckdb-exact_term": {
+    "ndcg@10": 0.2890648263178879,
+    "recall@5": 0.0
+   },
+   "q0080-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0081-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0082-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0083-duckdb-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0084-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0085-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0086-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0087-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0088-dbt-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0089-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0090-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0091-duckdb-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0092-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0093-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0094-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0095-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0096-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0097-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0098-dagster-conceptual": {
+    "ndcg@10": 0.3562071871080222,
+    "recall@5": 0.0
+   },
+   "q0099-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0100-duckdb-conceptual": {
+    "ndcg@10": 0.2890648263178879,
+    "recall@5": 0.0
+   },
+   "q0101-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0102-dagster-conceptual": {
+    "ndcg@10": 0.31546487678572877,
+    "recall@5": 0.0
+   },
+   "q0103-duckdb-exact_term": {
+    "ndcg@10": 0.6240505200038379,
+    "recall@5": 1.0
+   },
+   "q0104-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0105-dagster-conceptual": {
+    "ndcg@10": 0.3562071871080222,
+    "recall@5": 0.0
+   },
+   "q0106-dagster-conceptual": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0107-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0108-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0109-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0110-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0111-dbt-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0112-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0113-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0114-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0115-duckdb-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0116-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0117-dbt-conceptual": {
+    "ndcg@10": 0.24630238874073,
+    "recall@5": 0.25
+   },
+   "q0118-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0119-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0120-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0121-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0122-duckdb-conceptual": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0123-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0124-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0125-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0126-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0127-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0128-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0129-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0130-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0131-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0132-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0133-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0134-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0135-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0136-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0137-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0138-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0139-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0140-dbt-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0141-dagster-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0142-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0143-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0144-duckdb-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0145-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0146-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0147-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0148-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0149-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0150-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0151-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0152-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0153-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0154-dagster-exact_term": {
+    "ndcg@10": 0.3562071871080222,
+    "recall@5": 0.0
+   },
+   "q0155-dbt-exact_term": {
+    "ndcg@10": 0.8503449055347546,
+    "recall@5": 1.0
+   },
+   "q0156-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0157-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0158-dbt-exact_term": {
+    "ndcg@10": 0.18457569677956817,
+    "recall@5": 0.0
+   },
+   "q0159-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0160-duckdb-exact_term": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0161-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0162-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0163-dagster-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0164-duckdb-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0167-dbt-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0169-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0170-dbt-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0171-duckdb-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0172-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0173-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0174-dagster-exact_term": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0175-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0176-dagster-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0177-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0178-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0179-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0180-duckdb-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0181-duckdb-exact_term": {
+    "ndcg@10": 0.3010299956639812,
+    "recall@5": 0.0
+   }
+  },
+  "hybrid_score_weighted": {
+   "q0001-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0002-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0003-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0004-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0005-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0006-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0007-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0008-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0009-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0010-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0011-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0012-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0013-dbt-exact_term": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0014-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0015-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0016-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0017-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0018-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0019-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0020-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0021-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0022-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0023-dbt-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0024-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0025-dagster-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0026-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0027-dbt-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0028-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0029-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0030-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0031-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0032-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0033-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0034-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0035-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0036-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0037-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0038-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0039-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0040-duckdb-conceptual": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0041-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0042-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0043-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0044-duckdb-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0045-dagster-conceptual": {
+    "ndcg@10": 0.3562071871080222,
+    "recall@5": 0.0
+   },
+   "q0046-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0047-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0048-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0049-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0050-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0051-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0052-dagster-exact_term": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0053-duckdb-conceptual": {
+    "ndcg@10": 0.31546487678572877,
+    "recall@5": 0.0
+   },
+   "q0054-dagster-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0055-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0056-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0057-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0058-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0059-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0060-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0061-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0062-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0063-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0065-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0066-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0067-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0068-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0069-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0070-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0071-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0072-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0073-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0074-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0075-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0076-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0077-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0078-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0079-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0080-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0081-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0082-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0083-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0084-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0085-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0086-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0087-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0088-dbt-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0089-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0090-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0091-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0092-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0093-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0094-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0095-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0096-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0097-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0098-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0099-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0100-duckdb-conceptual": {
+    "ndcg@10": 0.31546487678572877,
+    "recall@5": 0.0
+   },
+   "q0101-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0102-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0103-duckdb-exact_term": {
+    "ndcg@10": 0.9197207891481876,
+    "recall@5": 1.0
+   },
+   "q0104-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0105-dagster-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0106-dagster-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0107-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0108-dbt-conceptual": {
+    "ndcg@10": 0.3562071871080222,
+    "recall@5": 0.0
+   },
+   "q0109-dagster-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0110-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0111-dbt-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0112-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0113-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0114-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0115-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0116-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0117-dbt-conceptual": {
+    "ndcg@10": 0.5585075862632192,
+    "recall@5": 0.5
+   },
+   "q0118-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0119-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0120-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0121-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0122-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0123-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0124-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0125-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0126-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0127-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0128-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0129-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0130-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0131-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0132-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0133-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0134-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0135-dagster-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0136-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0137-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0138-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0139-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0140-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0141-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0142-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0143-dbt-conceptual": {
+    "ndcg@10": 0.2890648263178879,
+    "recall@5": 0.0
+   },
+   "q0144-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0145-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0146-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0147-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0148-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0149-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0150-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0151-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0152-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0153-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0154-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0155-dbt-exact_term": {
+    "ndcg@10": 0.8175295903539445,
+    "recall@5": 0.5
+   },
+   "q0156-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0157-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0158-dbt-exact_term": {
+    "ndcg@10": 0.5012658353418871,
+    "recall@5": 1.0
+   },
+   "q0159-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0160-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0161-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0162-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0163-dagster-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0164-duckdb-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0167-dbt-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0169-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0170-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0171-duckdb-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0172-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0173-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0174-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0175-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0176-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0177-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0178-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0179-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0180-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0181-duckdb-exact_term": {
+    "ndcg@10": 0.31546487678572877,
+    "recall@5": 0.0
+   }
+  },
+  "hsw_hyde": {
+   "q0001-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0002-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0003-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0004-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0005-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0006-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0007-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0008-dagster-conceptual": {
+    "ndcg@10": 0.2890648263178879,
+    "recall@5": 0.0
+   },
+   "q0009-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0010-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0011-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0012-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0013-dbt-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0014-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0015-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0016-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0017-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0018-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0019-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0020-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0021-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0022-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0023-dbt-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0024-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0025-dagster-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0026-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0027-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0028-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0029-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0030-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0031-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0032-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0033-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0034-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0035-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0036-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0037-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0038-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0039-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0040-duckdb-conceptual": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0041-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0042-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0043-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0044-duckdb-conceptual": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0045-dagster-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0046-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0047-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0048-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0049-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0050-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0051-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0052-dagster-exact_term": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0053-duckdb-conceptual": {
+    "ndcg@10": 0.3562071871080222,
+    "recall@5": 0.0
+   },
+   "q0054-dagster-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0055-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0056-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0057-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0058-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0059-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0060-dbt-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0061-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0062-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0063-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0065-dbt-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0066-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0067-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0068-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0069-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0070-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0071-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0072-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0073-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0074-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0075-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0076-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0077-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0078-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0079-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0080-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0081-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0082-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0083-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0084-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0085-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0086-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0087-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0088-dbt-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0089-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0090-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0091-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0092-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0093-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0094-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0095-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0096-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0097-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0098-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0099-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0100-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0101-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0102-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0103-duckdb-exact_term": {
+    "ndcg@10": 0.9197207891481876,
+    "recall@5": 1.0
+   },
+   "q0104-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0105-dagster-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0106-dagster-conceptual": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0107-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0108-dbt-conceptual": {
+    "ndcg@10": 0.31546487678572877,
+    "recall@5": 0.0
+   },
+   "q0109-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0110-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0111-dbt-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0112-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0113-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0114-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0115-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0116-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0117-dbt-conceptual": {
+    "ndcg@10": 0.5413996682199069,
+    "recall@5": 0.5
+   },
+   "q0118-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0119-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0120-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0121-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0122-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0123-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0124-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0125-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0126-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0127-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0128-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0129-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0130-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0131-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0132-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0133-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0134-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0135-dagster-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0136-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0137-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0138-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0139-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0140-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0141-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0142-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0143-dbt-conceptual": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0144-duckdb-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0145-dagster-conceptual": {
+    "ndcg@10": 0.3010299956639812,
+    "recall@5": 0.0
+   },
+   "q0146-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0147-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0148-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0149-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0150-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0151-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0152-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0153-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0154-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0155-dbt-exact_term": {
+    "ndcg@10": 0.8315546295836225,
+    "recall@5": 0.5
+   },
+   "q0156-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0157-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0158-dbt-exact_term": {
+    "ndcg@10": 0.5706417189553201,
+    "recall@5": 1.0
+   },
+   "q0159-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0160-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0161-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0162-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0163-dagster-exact_term": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0164-duckdb-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0167-dbt-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0169-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0170-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0171-duckdb-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0172-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0173-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0174-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0175-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0176-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0177-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0178-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0179-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0180-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0181-duckdb-exact_term": {
+    "ndcg@10": 0.3010299956639812,
+    "recall@5": 0.0
+   }
+  },
+  "hsw_avg": {
+   "q0001-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0002-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0003-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0004-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0005-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0006-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0007-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0008-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0009-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0010-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0011-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0012-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0013-dbt-exact_term": {
+    "ndcg@10": 0.3010299956639812,
+    "recall@5": 0.0
+   },
+   "q0014-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0015-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0016-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0017-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0018-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0019-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0020-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0021-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0022-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0023-dbt-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0024-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0025-dagster-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0026-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0027-dbt-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0028-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0029-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0030-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0031-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0032-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0033-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0034-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0035-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0036-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0037-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0038-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0039-duckdb-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0040-duckdb-conceptual": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0041-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0042-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0043-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0044-duckdb-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0045-dagster-conceptual": {
+    "ndcg@10": 0.38685280723454163,
+    "recall@5": 1.0
+   },
+   "q0046-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0047-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0048-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0049-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0050-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0051-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0052-dagster-exact_term": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0053-duckdb-conceptual": {
+    "ndcg@10": 0.3562071871080222,
+    "recall@5": 0.0
+   },
+   "q0054-dagster-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0055-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0056-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0057-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0058-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0059-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0060-dbt-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0061-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0062-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0063-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0065-dbt-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0066-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0067-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0068-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0069-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0070-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0071-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0072-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0073-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0074-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0075-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0076-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0077-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0078-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0079-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0080-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0081-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0082-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0083-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0084-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0085-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0086-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0087-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0088-dbt-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0089-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0090-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0091-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0092-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0093-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0094-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0095-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0096-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0097-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0098-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0099-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0100-duckdb-conceptual": {
+    "ndcg@10": 0.31546487678572877,
+    "recall@5": 0.0
+   },
+   "q0101-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0102-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0103-duckdb-exact_term": {
+    "ndcg@10": 0.9197207891481876,
+    "recall@5": 1.0
+   },
+   "q0104-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0105-dagster-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0106-dagster-conceptual": {
+    "ndcg@10": 0.43067655807339306,
+    "recall@5": 1.0
+   },
+   "q0107-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0108-dbt-conceptual": {
+    "ndcg@10": 0.3333333333333333,
+    "recall@5": 0.0
+   },
+   "q0109-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0110-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0111-dbt-exact_term": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0112-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0113-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0114-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0115-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0116-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0117-dbt-conceptual": {
+    "ndcg@10": 0.5413996682199069,
+    "recall@5": 0.5
+   },
+   "q0118-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0119-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0120-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0121-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0122-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0123-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0124-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0125-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0126-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0127-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0128-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0129-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0130-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0131-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0132-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0133-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0134-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0135-dagster-conceptual": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0136-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0137-duckdb-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0138-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0139-duckdb-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0140-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0141-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0142-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0143-dbt-conceptual": {
+    "ndcg@10": 0.3010299956639812,
+    "recall@5": 0.0
+   },
+   "q0144-duckdb-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0145-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0146-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0147-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0148-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0149-dbt-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0150-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0151-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0152-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0153-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0154-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0155-dbt-exact_term": {
+    "ndcg@10": 0.8175295903539445,
+    "recall@5": 0.5
+   },
+   "q0156-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0157-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0158-dbt-exact_term": {
+    "ndcg@10": 0.5012658353418871,
+    "recall@5": 1.0
+   },
+   "q0159-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0160-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0161-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0162-dagster-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0163-dagster-exact_term": {
+    "ndcg@10": 0.5,
+    "recall@5": 1.0
+   },
+   "q0164-duckdb-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0167-dbt-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0169-duckdb-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0170-dbt-exact_term": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0171-duckdb-cross_tool": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0172-dagster-conceptual": {
+    "ndcg@10": 0.6309297535714575,
+    "recall@5": 1.0
+   },
+   "q0173-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0174-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0175-dbt-conceptual": {
+    "ndcg@10": 0.0,
+    "recall@5": 0.0
+   },
+   "q0176-dagster-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0177-dagster-conceptual": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0178-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0179-dbt-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0180-duckdb-exact_term": {
+    "ndcg@10": 1.0,
+    "recall@5": 1.0
+   },
+   "q0181-duckdb-exact_term": {
+    "ndcg@10": 0.31546487678572877,
+    "recall@5": 0.0
+   }
+  }
+ }
+}
