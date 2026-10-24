@@ -304,12 +304,20 @@ def run(
     provider: LLMProvider,
     commit: str,
     phase: str = "all",
+    replay: bool = False,
     log=print,
 ) -> dict[str, Any] | None:
     """Drafts (from the cache when present), then the registered evaluation, written once."""
     texts = question_texts()
-    drafts = write_drafts(provider, list(texts.items()), log=log)
-    save_drafts(drafts, drafts_path, model=provider.model)
+    if replay:
+        # A clean clone has no model cache; the committed drafts file is the replay source.
+        drafts = load_drafts(drafts_path)
+        missing = sorted(set(texts) - set(drafts))
+        if missing:
+            raise ValueError(f"{drafts_path} has no draft for {len(missing)} question(s)")
+    else:
+        drafts = write_drafts(provider, list(texts.items()), log=log)
+        save_drafts(drafts, drafts_path, model=provider.model)
     if phase == "drafts":
         return None
     from .dense import SentenceTransformerEmbedder

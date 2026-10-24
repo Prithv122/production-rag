@@ -991,6 +991,42 @@ recall@10 was unaffected. The decomposition's pre-registered reproduction gate f
 a different machine); it was replaced, before any decomposition number existed, by a same-machine
 gate against the real arms, which passed 184 of 184.
 
+### HyDE (hypothetical document embeddings) — measured, no gain for its cost
+
+**Question.** HyDE has a model write a short hypothetical answer, embeds it, and searches with it,
+on the claim that an answer sits closer to real answer passages than a short question does. This
+pipeline already fuses BM25 with dense search, so the question is whether a draft adds anything,
+alone in the dense leg and inside the live default `hybrid_score_weighted`. Prompt, arms, a baseline
+check and the decision rule were registered before any draft was written ([NOTES.md](NOTES.md),
+"HyDE arm: registered protocol"); "no gain for its cost" was an allowed result. Retrieval only: the
+draft never reaches the answer generator, and the served pipeline is unchanged.
+
+**Set-up.** One draft per question from the local `qwen2.5:7b-instruct-q3_K_M` (temperature 0, at
+most 128 tokens, cached), embedded as a document; the "average" arms search with the normalised mean
+of the question vector and the draft vector. Only the dense query vector changes; BM25, fusion and
+weights are the live default's. Both re-run baselines matched the stored per-question metrics on all
+177 questions before anything was compared.
+
+| `heading`, 177 scored questions | baseline | with HyDE | Δ nDCG@10 (95% paired bootstrap) | Δ recall@5 | Decision |
+|---|---:|---:|---:|---:|---|
+| Dense leg, draft only | 0.499 | 0.460 | −0.040 (−0.080 to +0.001) | −0.001 | no clear difference |
+| Dense leg, question + draft | 0.499 | 0.502 | +0.003 (−0.020 to +0.026) | +0.028 | no clear difference |
+| Live hybrid, draft in the dense leg | 0.658 | 0.658 | −0.000 (−0.014 to +0.014) | +0.000 | no clear difference |
+| Live hybrid, question + draft | 0.658 | 0.655 | −0.003 (−0.010 to +0.004) | +0.006 | no clear difference |
+
+**Cost.** One extra model call per query: median 14.2 s and p95 21.0 s for a 79-token draft on this
+laptop's local model (a hosted model would be faster, and none was used), plus 39 ms to embed the
+draft. 0 of 184 drafts failed. For no measurable gain, that is the result.
+
+**Where it hurts (exploratory).** Draft-only search dropped a gold chunk the baseline had found on 15
+questions, mostly exact-term ones, where it fell hardest (nDCG@10 0.653 to 0.562). The drafts read well
+and name things that do not exist: asked how to change where DuckDB looks for extensions, the model
+wrote about an `EXTENSION_PATH` setting (the real one is `extension_directory`, and `EXTENSION_PATH`
+appears nowhere in the corpus); asked about autocomplete in the DuckDB shell, it described sourcing a
+zsh completion script. Inside the hybrid, BM25 on the question keeps those names out of the ranking,
+which is why the hybrid arms barely move. Averaging with the question vector also limits the damage
+(3 questions lost a gold chunk with the dense average, 0 with the hybrid average).
+
 ## 6. How to run
 
 ```bash
@@ -1231,6 +1267,16 @@ refuses to overwrite it:
 ```bash
 uv run --extra embed production-rag agentic-run --dry-run
 uv run --extra embed production-rag agentic-run
+```
+
+The HyDE arm is also evaluation-only. `--replay` reads the committed drafts
+(`eval/results/hyde_drafts.json`) and needs no model; checked on a copy with the model cache
+removed, it reproduces `eval/results/hyde.json` exactly. Without `--replay` it asks the local
+model for any draft not yet cached (about 45 minutes for all 184 on this laptop):
+
+```bash
+uv run --extra embed production-rag hyde-run --replay --out hyde_check.json
+uv run --extra embed production-rag hyde-run
 ```
 
 **Verified, not asserted.** The answer table above was reproduced from a *fresh* cache built

@@ -116,3 +116,20 @@ def test_compare_reports_every_arm_against_its_own_baseline() -> None:
         r"\| `hsw_hyde` \| `hybrid_score_weighted`",
         hyde.format_report({"comparisons": out}).split("\n")[4],
     )
+
+
+def test_replay_reads_the_committed_drafts_and_refuses_a_gap(tmp_path) -> None:
+    drafts = {"q1": hyde.Draft("q1", "text", False, 1.0, 5, True)}
+    path = tmp_path / "drafts.json"
+    hyde.save_drafts(drafts, path, model="m")
+    assert hyde.load_drafts(path) == drafts
+    with pytest.raises(ValueError, match="no draft"):
+        hyde.run(
+            indexes=tmp_path,
+            retrieval_json=tmp_path / "r.json",
+            drafts_path=path,
+            out=tmp_path / "o.json",
+            provider=FakeProvider(),
+            commit="x",
+            replay=True,
+        )

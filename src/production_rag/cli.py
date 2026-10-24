@@ -1105,6 +1105,7 @@ def cmd_hyde_run(args: argparse.Namespace) -> int:
         provider=provider,
         commit=commit + ("-dirty" if dirty else ""),
         phase=args.phase,
+        replay=args.replay,
     )
     if result is None:
         print(f"drafts written to {args.drafts}")
@@ -1668,7 +1669,9 @@ def build_parser() -> argparse.ArgumentParser:
     hyde.add_argument("--out", type=Path, default=Path("eval/results/hyde.json"))
     hyde.add_argument("--llm-cache", type=Path, default=Path(".cache/hyde-llm"))
     hyde.add_argument("--phase", choices=["all", "drafts"], default="all")
-    hyde.add_argument("--replay", action="store_true", help="drafts from the cache only, no model")
+    hyde.add_argument(
+        "--replay", action="store_true", help="use the committed drafts file; no model call"
+    )
     hyde.set_defaults(func=cmd_hyde_run)
 
     cache = subparsers.add_parser("cache", help="bundle or restore the replay caches")

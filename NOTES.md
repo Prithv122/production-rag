@@ -2233,3 +2233,29 @@ Fixed while building, where the protocol was silent; none is a tuning knob and n
   weights (2, 1), lexical list first, over pool-50 lists, as `Retriever.retrieve` does; a test checks
   both baselines against `Retriever.retrieve` on a toy index, and the run's baseline gate checks them
   against the stored per-question metrics.
+
+## HyDE arm: result, no gain for its cost (2026-10-24)
+
+`production-rag hyde-run`, drafts commit `a6790d1`, result `eval/results/hyde.json` (`2af3cd4`).
+184 drafts, 0 failed, median 79 tokens, median 14.2 s and p95 21.0 s per draft on the local model
+(`num_ctx` 2,048). Both baseline gates passed: the re-run `dense` and `hybrid_score_weighted` matched
+the stored per-question recall@5 and nDCG@10 on all 177 questions.
+
+| Arm vs baseline | nDCG@10 Δ (95% CI) | recall@5 Δ (95% CI) | Decision |
+|---|---|---|---|
+| `dense_hyde` vs `dense` | −0.040 (−0.080, +0.001) | −0.001 (−0.052, +0.051) | no clear difference |
+| `dense_avg` vs `dense` | +0.003 (−0.020, +0.026) | +0.028 (−0.006, +0.065) | no clear difference |
+| `hsw_hyde` vs `hybrid_score_weighted` | −0.000 (−0.014, +0.014) | +0.000 (−0.017, +0.017) | no clear difference |
+| `hsw_avg` vs `hybrid_score_weighted` | −0.003 (−0.010, +0.004) | +0.006 (+0.000, +0.017) | no clear difference |
+
+By type (descriptive): draft-only dense loses most on exact_term questions (nDCG@10 0.653 → 0.562;
+conceptual 0.450 → 0.431). Exploratory failure count (gold chunk in the baseline top 10, gone with
+HyDE): 15 questions for `dense_hyde`, 3 for `dense_avg`, 2 for `hsw_hyde`, 0 for `hsw_avg`. Two
+examples checked by hand against the corpus: q0005's draft names an `EXTENSION_PATH` setting that
+does not exist (the docs use `extension_directory`); q0024's describes a zsh completion script for a
+question answered by DuckDB's own `clients/cli/autocomplete` page. `dense_hyde`'s upper bound is
++0.001, so it is close to "worse" under the registered rule, but it is not.
+
+**Replay.** Added after the result, without touching the measurement: `hyde-run --replay` reads the
+committed drafts file instead of the git-ignored model cache, so a clean clone reproduces the
+result. With the cache moved away, a replay produced identical comparisons and per-question metrics.
