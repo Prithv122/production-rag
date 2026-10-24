@@ -95,9 +95,10 @@ def test_baselines_match_the_retriever_and_a_failed_draft_falls_back(
 def test_average_vector_is_the_normalised_mean(embedder) -> None:
     q = embedder.encode_query("parquet files")
     d = embedder.encode_documents(["duckdb read_parquet"])[0]
-    avg = (q + d) / np.linalg.norm(q + d)
+    avg = hyde.average_vector(q, d)
     assert np.isclose(np.linalg.norm(avg), 1.0)
-    assert np.dot(avg, q) > 0 and np.dot(avg, d) > 0
+    assert np.allclose(avg, (q / 2 + d / 2) / np.linalg.norm(q / 2 + d / 2))
+    assert np.isclose(np.dot(avg, q), np.dot(avg, d))  # equidistant from two unit vectors
 
 
 def test_compare_reports_every_arm_against_its_own_baseline() -> None:
@@ -145,3 +146,17 @@ def test_local_bootstrap_and_percentile_match_the_agentic_versions() -> None:
     )
     values = list(rng.random(25))
     assert hyde.percentile(values, 0.95) == agentic.percentile(values, 0.95)
+
+
+def test_a_live_run_with_a_failed_draft_writes_nothing(tmp_path) -> None:
+    path = tmp_path / "drafts.json"
+    with pytest.raises(RuntimeError, match="failed"):
+        hyde.run(
+            indexes=tmp_path,
+            retrieval_json=tmp_path / "r.json",
+            drafts_path=path,
+            out=tmp_path / "o.json",
+            provider=FakeProvider(fail=True),
+            commit="x",
+        )
+    assert not path.exists() and not (tmp_path / "o.json").exists()

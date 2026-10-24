@@ -2236,7 +2236,8 @@ Fixed while building, where the protocol was silent; none is a tuning knob and n
 
 ## HyDE arm: result, no gain for its cost (2026-10-24)
 
-`production-rag hyde-run`, drafts commit `a6790d1`, result `eval/results/hyde.json` (`2af3cd4`).
+`production-rag hyde-run` on harness commit `a6790d1` (the result records `a6790d1-dirty`: the drafts
+and result files were still untracked), result `eval/results/hyde.json` and drafts committed in `2af3cd4`.
 184 drafts, 0 failed, median 79 tokens, median 14.2 s and p95 21.0 s per draft on the local model
 (`num_ctx` 2,048). Both baseline gates passed: the re-run `dense` and `hybrid_score_weighted` matched
 the stored per-question recall@5 and nDCG@10 on all 177 questions.
@@ -2252,10 +2253,29 @@ By type (descriptive): draft-only dense loses most on exact_term questions (nDCG
 conceptual 0.450 → 0.431). Exploratory failure count (gold chunk in the baseline top 10, gone with
 HyDE): 15 questions for `dense_hyde`, 3 for `dense_avg`, 2 for `hsw_hyde`, 0 for `hsw_avg`. Two
 examples checked by hand against the corpus: q0005's draft names an `EXTENSION_PATH` setting that
-does not exist (the docs use `extension_directory`); q0024's describes a zsh completion script for a
-question answered by DuckDB's own `clients/cli/autocomplete` page. `dense_hyde`'s upper bound is
+does not exist (the docs use `extension_directory`); q0100's invents a `sample-stream-count` setting,
+also absent from the corpus. (A first version of this note used q0024 instead; its question never
+names DuckDB and its gold is a table row worded almost like the question, so it shows an
+under-specified question, not an invented name.) `dense_hyde`'s upper bound is
 +0.001, so it is close to "worse" under the registered rule, but it is not.
 
 **Replay.** Added after the result, without touching the measurement: `hyde-run --replay` reads the
-committed drafts file instead of the git-ignored model cache, so a clean clone reproduces the
-result. With the cache moved away, a replay produced identical comparisons and per-question metrics.
+committed drafts file instead of the git-ignored model cache. It still needs the dense `heading`
+index and the `embed` extra, which are not in the repository (the protocol's "committed `heading`
+indexes" is wrong on that point: they are rebuilt with `ingest` and `index`). With the cache moved
+away, a replay produced identical gates, comparisons, per-question metrics and failure lists; only the
+commit and the measured draft-embedding time differ.
+
+**Changes after the result** (none alters it, and the replay above was repeated after them):
+- `hyde.py` no longer imports the agentic arm (the isolation guard caught it; commits `a6790d1` to
+  `c90cb3a` fail that guard, HEAD passes); its own bootstrap and percentile are pinned to the agentic
+  versions by a test.
+- A live `hyde-run` now checks that Ollama lists the model, refuses to replace an existing result
+  without `--force`, and writes nothing if any draft fails. The registered rule (a failed draft falls
+  back to the question) still exists in the code; this run had 0 failed drafts, so both give the same
+  result, but a dead model can no longer overwrite the committed drafts with 184 fallbacks.
+- 6 of the 184 drafts reached the 128-token cap and were cut short; noted in the README.
+- Fresh-eyes review (diff and goal only): fixed the "mostly exact-term" claim (9 conceptual, 6
+  exact-term), the q0024 example, "registered before any draft was written" (a timing pilot and five
+  discarded drafts came first), "reproduces exactly", the untested BM25 explanation (now labelled),
+  the missing gains next to losses, and the missing HyDE reference.

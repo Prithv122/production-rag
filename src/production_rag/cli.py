@@ -1097,6 +1097,14 @@ def cmd_hyde_run(args: argparse.Namespace) -> int:
         fallback=False,
         num_ctx=hyde.NUM_CTX,
     )
+    if args.phase == "all" and args.out.exists() and not args.force:
+        print(f"{args.out} already exists; pass --force to replace it")
+        return 1
+    if not args.replay:
+        problem, _ = _ollama_ready(provider.inner.host, provider.model)
+        if problem:
+            print(problem)
+            return 1
     result = hyde.run(
         indexes=args.indexes,
         retrieval_json=args.retrieval,
@@ -1669,6 +1677,7 @@ def build_parser() -> argparse.ArgumentParser:
     hyde.add_argument("--out", type=Path, default=Path("eval/results/hyde.json"))
     hyde.add_argument("--llm-cache", type=Path, default=Path(".cache/hyde-llm"))
     hyde.add_argument("--phase", choices=["all", "drafts"], default="all")
+    hyde.add_argument("--force", action="store_true", help="replace an existing --out file")
     hyde.add_argument(
         "--replay", action="store_true", help="use the committed drafts file; no model call"
     )

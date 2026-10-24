@@ -195,6 +195,11 @@ def stored_metrics(retrieval_json: Path, arm: str) -> dict[str, dict[str, float]
     return out
 
 
+def average_vector(query_vector: np.ndarray, draft_vector: np.ndarray) -> np.ndarray:
+    """The normalised mean of two unit vectors (normalising the sum gives the same direction)."""
+    return l2_normalise((query_vector + draft_vector).reshape(1, -1))[0]
+
+
 def rank(retriever, question: str, vector: np.ndarray, leg: str) -> list[str]:
     dense = retriever.dense.search_vector(vector, k=POOL)
     if leg == "dense":
@@ -223,7 +228,7 @@ def evaluate(
             dv = embedder.encode_documents([d.text])[0]
             encode_s.append(time.perf_counter() - mark)
             dv = l2_normalise(np.asarray(dv, dtype=np.float32).reshape(1, -1))[0]
-        av = l2_normalise((qv + dv).reshape(1, -1))[0]
+        av = average_vector(qv, dv)
         vectors = {"query": qv, "draft": dv, "avg": av}
         for arm, leg, which in HYDE_ARMS:
             top = rank(retriever, q, vectors[which], leg)
@@ -353,6 +358,11 @@ def run(
             raise ValueError(f"{drafts_path} has no draft for {len(missing)} question(s)")
     else:
         drafts = write_drafts(provider, list(texts.items()), log=log)
+        failed = [d.qid for d in drafts.values() if d.failed]
+        if failed:
+            # Never let a dead or flaky model overwrite the committed drafts: a failed draft
+            # falls back to the question, so a run of failures would look like "no difference".
+            raise RuntimeError(f"{len(failed)} draft(s) failed; nothing was written")
         save_drafts(drafts, drafts_path, model=provider.model)
     if phase == "drafts":
         return None
